@@ -65,9 +65,26 @@ colab exec -s colab -f job.py --timeout 3600
 
 - One file: `colab upload <local> /content/<path>` and `colab download /content/<path> <local>`.
 - A repository: clone it on the VM (a public GitHub repo needs no credentials), e.g. `subprocess.run(['git', 'clone', '--depth', '1', '<url>', '/content/<dir>'], check=True)`. That is faster than uploading files one at a time.
-- Google Drive: `colab drivemount` needs a person at the terminal; run without one, it hangs silently. Don't call it. Options, in order:
-  1. Ask the user to run `from google.colab import drive; drive.mount('/content/drive')` in the Colab web UI attached to the same runtime (`colab url -s <name>` prints the link). The mount is on the VM, so your later `exec` calls should see `/content/drive`. This has not been verified yet; check with `os.path.isdir('/content/drive/MyDrive')`.
-  2. For a few small files, use the Google Drive connector if this session has it. It only takes content written out inline, so it does not work for archives or images of any size.
+- Google Drive: `colab drivemount` prints a Google consent URL and then waits for Enter (there is no code; the user only clicks Allow). Use the bundled script, which keeps it alive on a fifo:
+
+  ```bash
+  .claude/skills/colab/scripts/colab-drivemount.sh start <session>   # prints the consent URL
+  .claude/skills/colab/scripts/colab-drivemount.sh done              # after the user says they granted access
+  ```
+
+  - The kernel-side `drive.mount()` times out about **120 s after `start`**. A grant that came later failed with `ValueError: mount failed` (drive-timeout). So run `start` only when the user is ready, hand over the URL at once, and tell them to click Allow within two minutes and reply. If it fails, run `start` again for a fresh URL.
+  - The URL pre-fills the account (`login_hint`); tell the user to keep that account.
+  - Check the result with `os.path.isdir('/content/drive/MyDrive')`.
+  - Don't run `drive.mount()` through `colab exec`: the auth request is not surfaced, and the cell blocks the kernel until its timeout.
+  - Don't send the user to the `colab url` link to mount Drive there. In practice it opened a **new** runtime instead of attaching to the CLI's VM, so Drive was mounted on the wrong machine, and that extra runtime kept billing.
+  - For a few small files, the Google Drive connector (if this session has it) is an alternative; it only takes content written out inline.
+
+### Gotchas seen in practice
+
+- `colab url -s <name>` can open a separate runtime in the browser. It then shows up in `colab sessions` as `[?]`, and `colab stop` cannot stop it ("Session not found"). Only the user can close it, from the Colab web UI: Runtime → Manage sessions → Terminate (运行时 → 管理会话 → 终止).
+- Python scripts that start child processes with `spawn` (vLLM's engine, multiprocessing) must not be launched as `python script.py` when they lack an `if __name__ == "__main__":` guard: each child re-executes the whole script and fails with "An attempt has been made to start a new process before the current process has finished its bootstrapping phase". Launch with `python -c "p='/content/x.py'; exec(compile(open(p).read(), p, 'exec'))"`, and avoid initializing CUDA in the parent before the engine starts.
+- `colab download` reads files without going through the kernel, so it still works while a long cell is blocking the kernel. Use it to read logs in that situation.
+- An install into a folder (`pip install --target /content/pkgs ...`) can be tarred up and reused on the next VM. Each new runtime is a fresh machine, so nothing installed on a CPU VM carries over to a GPU VM unless you move it through Drive or another store.
 
 ## 6. Finish
 
