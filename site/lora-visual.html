@@ -255,6 +255,14 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
       <div class="cap small muted">前 4 张图层分别长什么样。每张图左边那一竖条是 u（48 个数），上面那一横条是 v（96 个数），中间就是它们的外积：第 i 行第 j 列 = u 的第 i 个数 × v 的第 j 个数。</div>
       <div class="lab-grid" id="layerGrid"></div>
     </div>
+    <details class="small">
+      <summary style="cursor:pointer;font-weight:700">这些向量是怎么算出来的？</summary>
+      <div class="stack" style="margin-top:10px">
+        <p><b>思路（一层一层剥）</b>：先找一对 u、v，让它们的外积和 M 最像，这就是第 1 层；从 M 里减掉第 1 层，在剩下的部分里再找最像的一对，就是第 2 层；如此重复。对于矩阵来说，这样逐层取最优，叠起来也恰好是整体最优：前 r 层之和就是所有秩为 r 的矩阵里离 M 最近的（Eckart–Young 定理）。</p>
+        <p><b>页面里实际的算法</b>：计算 M·Mᵀ（48 × 48），用 Jacobi 旋转法把它对角化，得到特征向量 uᵢ 和特征值 σᵢ²，按大小排序；再算 Mᵀ·uᵢ = σᵢ·vᵢ 得到对应的行向量。前 r 层之和就是 Σ uᵢ·(Mᵀuᵢ)ᵀ。我用 Node 验证过：右图和原图的差距平方和，恰好等于被丢掉的 σ² 之和。</p>
+        <p><b>LoRA 不这么算</b>：SVD 需要先知道完整的矩阵，而微调时 ΔW 事先并不知道。LoRA 是拿 B、A 作参数用梯度下降去学，第 4 节的实验显示，梯度下降会收敛到和 SVD 一样的最低误差。</p>
+      </div>
+    </details>
   </div>
 
   <p class="prose">切到"纯随机噪声"会发现：奇异值几乎一样大，砍掉哪一层都损失差不多，低秩近似就不灵了。<b>所以 LoRA 能用，前提是要学的变化 ΔW 本身有结构。</b>为什么微调的 ΔW 往往如此？</p>
