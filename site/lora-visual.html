@@ -1,0 +1,691 @@
+<title>LoRA 图解</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;900&display=swap">
+<style>
+/* Layout: one reading column for prose, wider figure panels for the interactive pieces.
+   Color logic: cool slate = frozen weights, amber = trainable LoRA; heatmaps diverge teal(-) / amber(+). */
+:root {
+  --bg: #eef1f4;
+  --surface: #ffffff;
+  --ink: #18212b;
+  --muted: #5b6672;
+  --line: #d3dae2;
+  --frozen: #5b7895;
+  --frozen-soft: #dde6ef;
+  --train: #c2611a;
+  --train-soft: #f5e1cf;
+  --pos: #c2611a;
+  --neg: #2b7c84;
+  --ok: #2f7d4f;
+  --font-display: "Noto Serif SC", "Songti SC", "SimSun", serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #10151b; --surface: #18202a; --ink: #e3e8ee; --muted: #94a1ae; --line: #2a3542;
+    --frozen: #89a6c2; --frozen-soft: #1f2d3c; --train: #ea9350; --train-soft: #3a2919;
+    --pos: #ea9350; --neg: #4fb4ba; --ok: #5cc28a; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #10151b; --surface: #18202a; --ink: #e3e8ee; --muted: #94a1ae; --line: #2a3542;
+  --frozen: #89a6c2; --frozen-soft: #1f2d3c; --train: #ea9350; --train-soft: #3a2919;
+  --pos: #ea9350; --neg: #4fb4ba; --ok: #5cc28a; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.75;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+.wrap { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px; }
+.prose { max-width: 68ch; }
+h1, h2 { font-family: var(--font-display); text-wrap: balance; line-height: 1.3; margin: 0; }
+h1 { font-size: clamp(30px, 5vw, 48px); font-weight: 900; letter-spacing: 0.01em; }
+h2 { font-size: clamp(22px, 3vw, 30px); font-weight: 600; }
+h3 { font-size: 17px; margin: 0; font-weight: 700; }
+p { margin: 0; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--muted);
+}
+.step-no { font-family: var(--font-mono); color: var(--train); font-weight: 600; margin-right: 10px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.92em; }
+.frozen-t { color: var(--frozen); font-weight: 700; }
+.train-t { color: var(--train); font-weight: 700; }
+.muted { color: var(--muted); }
+.small { font-size: 14px; }
+
+header.hero { padding-top: 40px; display: flex; flex-direction: column; gap: 16px; }
+.hero .lede { font-size: 18px; color: var(--muted); max-width: 60ch; }
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px;
+  display: flex; flex-direction: column; gap: 16px;
+  min-width: 0;
+}
+.controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; }
+.ctrl { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.ctrl label { color: var(--muted); white-space: nowrap; }
+.ctrl output { font-family: var(--font-mono); font-weight: 600; min-width: 3.5ch; }
+input[type="range"] { accent-color: var(--train); width: 160px; max-width: 40vw; }
+select, button {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px;
+}
+button { cursor: pointer; }
+button.primary { background: var(--train); border-color: var(--train); color: var(--surface); font-weight: 700; }
+button:hover { border-color: var(--train); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--train); outline-offset: 2px; }
+
+.fig { overflow-x: auto; }
+svg text { font-family: var(--font-body); }
+.svg-ink { fill: var(--ink); }
+.svg-muted { fill: var(--muted); }
+.svg-frozen { fill: var(--frozen-soft); stroke: var(--frozen); stroke-width: 1.5; }
+.svg-train { fill: var(--train-soft); stroke: var(--train); stroke-width: 1.5; }
+.svg-train-solid { fill: var(--train); }
+.svg-frozen-solid { fill: var(--frozen); }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.stat { border-top: 2px solid var(--line); padding-top: 8px; min-width: 0; }
+.stat .k { font-size: 13px; color: var(--muted); }
+.stat .v { font-family: var(--font-mono); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat.frozen { border-color: var(--frozen); }
+.stat.train { border-color: var(--train); }
+
+.ratio-bar { height: 14px; background: var(--frozen-soft); border-radius: 3px; overflow: hidden; border: 1px solid var(--frozen); }
+.ratio-bar > div { height: 100%; background: var(--train); min-width: 2px; }
+
+/* flow diagram */
+.flow-path { fill: none; stroke-width: 2.5; }
+.flow-frozen { stroke: var(--frozen); }
+.flow-train { stroke: var(--train); stroke-dasharray: 6 6; animation: dash 1.2s linear infinite; }
+@keyframes dash { to { stroke-dashoffset: -24; } }
+@media (prefers-reduced-motion: reduce) { .flow-train { animation: none; } }
+
+/* lab */
+.lab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 18px; }
+.cell { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cell canvas { width: 100%; max-width: 220px; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 4px; }
+.cell .cap { font-size: 13px; color: var(--muted); }
+.wide canvas { max-width: 100%; image-rendering: auto; }
+.readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+.readout div { font-size: 13px; color: var(--muted); }
+.readout b { display: block; font-family: var(--font-mono); font-size: 17px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.verdict { font-size: 15px; padding: 10px 14px; border-left: 3px solid var(--train); background: var(--train-soft); border-radius: 0 6px 6px 0; }
+
+/* memory bars */
+.mem-row { display: grid; grid-template-columns: 88px 1fr 80px; gap: 12px; align-items: center; }
+.mem-row .name { font-size: 14px; font-weight: 700; }
+.mem-row .tot { font-family: var(--font-mono); font-size: 14px; text-align: right; font-variant-numeric: tabular-nums; }
+.mem-track { position: relative; height: 30px; display: flex; min-width: 0; }
+.seg { height: 100%; border-right: 1px solid var(--surface); }
+.seg-w { background: var(--frozen); }
+.seg-g { background: color-mix(in srgb, var(--frozen) 65%, var(--surface)); }
+.seg-m { background: color-mix(in srgb, var(--frozen) 45%, var(--surface)); }
+.seg-o { background: color-mix(in srgb, var(--frozen) 28%, var(--surface)); }
+.seg-l { background: var(--train); }
+.seg-a { background: repeating-linear-gradient(45deg, var(--muted) 0 3px, transparent 3px 7px); opacity: 0.55; }
+.gpu-line { position: absolute; top: -6px; bottom: -6px; border-left: 2px dashed var(--ink); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 12px; height: 12px; display: inline-block; border-radius: 2px; }
+
+table { border-collapse: collapse; font-size: 14px; }
+th, td { padding: 6px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.takeaways { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.takeaways .panel { gap: 8px; }
+
+footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 520px) {
+  .mem-row { grid-template-columns: 64px 1fr 64px; gap: 8px; }
+  .panel { padding: 14px; }
+}
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">MiMo 学习笔记 · 原理图解</div>
+  <h1>冻结 94 亿参数，只训练旁边那 1.6 亿</h1>
+  <p class="lede">LoRA 不改原来的大矩阵 W，而是在旁边挂两个很窄的小矩阵 B 和 A，用它们的乘积表示"要改多少"。下面每一节都可以动手调，数字按 MiMo-V2.6-Distill-Qwen-9B 的真实形状计算。</p>
+</header>
+
+<!-- 1. shapes -->
+<section class="stack" id="shape">
+  <h2><span class="step-no">1</span>形状：ΔW = B · A</h2>
+  <p class="prose">微调就是把 W 改成 W + ΔW。LoRA 假设 ΔW 只沿少数几个方向变化，于是用一个高而窄的 <span class="train-t">B</span>（d_out × r）乘一个矮而宽的 <span class="train-t">A</span>（r × d_in）来表示它。<b>r 就是那条"窄缝"的宽度。</b>拖动 r 看看窄缝有多窄。</p>
+  <div class="panel">
+    <div class="controls">
+      <div class="ctrl">
+        <label for="preset">哪一层</label>
+        <select id="preset">
+          <option value="gate">gate_proj · MLP（4096 → 12288）</option>
+          <option value="q">q_proj · 全注意力（4096 → 8192）</option>
+          <option value="down">down_proj · MLP（12288 → 4096）</option>
+          <option value="toy">演示脚本里的 256 × 256</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label for="rIdx">秩 r</label>
+        <input type="range" id="rIdx" min="0" max="8" step="1" value="6">
+        <output id="rOut" for="rIdx">64</output>
+      </div>
+    </div>
+    <div class="fig"><svg id="shapeSvg" role="img" aria-label="W 与 B、A 的形状对比"></svg></div>
+    <div class="stats">
+      <div class="stat frozen"><div class="k">W 参数（冻结）</div><div class="v" id="sFull">–</div></div>
+      <div class="stat train"><div class="k">B + A 参数（训练）</div><div class="v" id="sLora">–</div></div>
+      <div class="stat train"><div class="k">占这一层的比例</div><div class="v" id="sRatio">–</div></div>
+      <div class="stat train"><div class="k">全模型 LoRA 参数（同样的 r）</div><div class="v" id="sModel">–</div></div>
+    </div>
+    <div class="ratio-bar" aria-hidden="true"><div id="ratioFill"></div></div>
+    <p class="small muted">全模型按语言模型里全部 32 层的线性层计算（MLP、8 层全注意力、24 层线性注意力），不含视觉塔。r = 64 时约 1.6 亿，占 9.41B 的 1.7%。</p>
+  </div>
+</section>
+
+<!-- 2. flow -->
+<section class="stack" id="flow">
+  <h2><span class="step-no">2</span>数据怎么走：两条路相加</h2>
+  <p class="prose">输入 x 同时走两条路。上面是原来的 <span class="frozen-t">W</span>，参数冻结、没有梯度；下面先被 <span class="train-t">A</span> 压到 r 维，再被 <span class="train-t">B</span> 展开回 d_out 维，乘上缩放系数 α/r 后与上面的结果相加。计算顺序是先 A 后 B，<b>训练时从不把 B·A 这个大矩阵乘出来</b>。</p>
+  <div class="panel">
+    <div class="fig">
+      <svg viewBox="0 0 760 250" width="100%" role="img" aria-label="LoRA 前向数据流">
+        <text x="20" y="130" class="svg-ink" font-size="22" font-weight="700">x</text>
+        <text x="16" y="152" class="svg-muted" font-size="12">d_in 维</text>
+        <path class="flow-path flow-frozen" d="M45 122 C 110 122, 120 60, 190 60"/>
+        <path class="flow-path flow-train" d="M45 128 C 110 128, 120 185, 190 185"/>
+        <rect x="190" y="25" width="300" height="70" rx="6" class="svg-frozen"/>
+        <text x="340" y="56" text-anchor="middle" class="svg-ink" font-size="18" font-weight="700">W · x</text>
+        <text x="340" y="80" text-anchor="middle" class="svg-muted" font-size="12">冻结 · 不算 W 的梯度</text>
+        <rect x="190" y="150" width="120" height="70" rx="6" class="svg-train"/>
+        <text x="250" y="182" text-anchor="middle" class="svg-ink" font-size="18" font-weight="700">A · x</text>
+        <text x="250" y="204" text-anchor="middle" class="svg-muted" font-size="12">d_in → r</text>
+        <path class="flow-path flow-train" d="M310 185 L 350 185"/>
+        <rect x="350" y="174" width="14" height="22" class="svg-train-solid"/>
+        <text x="357" y="236" text-anchor="middle" class="svg-muted" font-size="12">r 维窄缝</text>
+        <path class="flow-path flow-train" d="M364 185 L 390 185"/>
+        <rect x="390" y="150" width="100" height="70" rx="6" class="svg-train"/>
+        <text x="440" y="182" text-anchor="middle" class="svg-ink" font-size="18" font-weight="700">B · (·)</text>
+        <text x="440" y="204" text-anchor="middle" class="svg-muted" font-size="12">r → d_out</text>
+        <path class="flow-path flow-frozen" d="M490 60 C 560 60, 560 122, 610 122"/>
+        <path class="flow-path flow-train" d="M490 185 C 560 185, 560 128, 610 128"/>
+        <text x="540" y="168" class="svg-muted" font-size="12">× α/r</text>
+        <circle cx="625" cy="125" r="16" class="svg-frozen"/>
+        <text x="625" y="131" text-anchor="middle" class="svg-ink" font-size="18" font-weight="700">+</text>
+        <path class="flow-path flow-frozen" d="M641 125 L 690 125"/>
+        <text x="700" y="131" class="svg-ink" font-size="22" font-weight="700">y</text>
+      </svg>
+    </div>
+    <p class="mono" style="text-align:center">y = W·x + (α / r) · B·(A·x)</p>
+  </div>
+</section>
+
+<!-- 3. lab -->
+<section class="stack" id="lab">
+  <h2><span class="step-no">3</span>动手训练：r 够不够</h2>
+  <p class="prose">这里在浏览器里真跑一个小 LoRA（16 × 16）。先随机造一个"真实变化" ΔW，它的秩是 k；再用秩为 r 的 B·A 去逼近它（Adam + 余弦退火，1500 步）。注意两件事：<b>第 0 步 A 的梯度恰好是 0</b>，因为 B 初始化为 0；<b>r 小于 k 时 loss 会停在一条线上</b>，那条线就是"秩为 r 的矩阵最好能做到的程度"。</p>
+  <div class="panel">
+    <div class="controls">
+      <div class="ctrl"><label for="kIn">真实变化的秩 k</label><input type="range" id="kIn" min="1" max="8" value="4"><output id="kOut" for="kIn">4</output></div>
+      <div class="ctrl"><label for="rIn">LoRA 的秩 r</label><input type="range" id="rIn" min="1" max="8" value="2"><output id="rOut2" for="rIn">2</output></div>
+      <button class="primary" id="trainBtn" type="button">训练 1500 步</button>
+      <button id="stepBtn" type="button">走 1 步</button>
+      <button id="newBtn" type="button">换一个 ΔW</button>
+    </div>
+    <div class="readout">
+      <div>步数<b id="rdStep">0</b></div>
+      <div>当前 loss<b id="rdLoss">–</b></div>
+      <div>理论下限<b id="rdBound">–</b></div>
+      <div>‖∇A‖<b id="rdGA">–</b></div>
+      <div>‖∇B‖<b id="rdGB">–</b></div>
+    </div>
+    <div class="lab-grid">
+      <div class="cell"><canvas id="cvD" width="16" height="16"></canvas><div class="cap">目标 ΔW（秩 k）</div></div>
+      <div class="cell"><canvas id="cvBA" width="16" height="16"></canvas><div class="cap">学到的 B·A（秩 ≤ r）</div></div>
+      <div class="cell"><canvas id="cvB" width="16" height="16"></canvas><div class="cap">B（16 × r），初始全 0</div></div>
+      <div class="cell"><canvas id="cvA" width="16" height="16"></canvas><div class="cap">A（r × 16），初始随机</div></div>
+    </div>
+    <div class="lab-grid">
+      <div class="cell wide"><canvas id="cvLoss" width="480" height="220"></canvas><div class="cap">loss（对数坐标）；虚线是秩 r 的理论下限</div></div>
+      <div class="cell wide"><canvas id="cvSv" width="480" height="220"></canvas><div class="cap">ΔW 的奇异值：橙色的 r 个方向 LoRA 能学，灰色的学不到</div></div>
+    </div>
+    <p class="verdict" id="verdict">点「训练」开始。</p>
+  </div>
+</section>
+
+<!-- 4. alpha -->
+<section class="stack" id="alpha">
+  <h2><span class="step-no">4</span>α / r：旁路的音量旋钮</h2>
+  <p class="prose">旁路输出要乘一个缩放系数。标准 LoRA 用 α/r，rsLoRA 用 α/√r。如果固定 α 去改 r，系数会跟着变，相当于悄悄改了学习率。常见做法是 α = r（系数为 1），并且把 LoRA 的学习率设得比全参数高一个数量级左右。</p>
+  <div class="panel">
+    <div class="controls">
+      <div class="ctrl"><label for="aIn">α</label><input type="range" id="aIn" min="1" max="128" value="64"><output id="aOut" for="aIn">64</output></div>
+      <div class="ctrl"><label for="ar">r</label><input type="range" id="ar" min="0" max="8" value="6"><output id="arOut" for="ar">64</output></div>
+    </div>
+    <div class="stats">
+      <div class="stat train"><div class="k">标准 LoRA 系数 α / r</div><div class="v" id="sStd">–</div></div>
+      <div class="stat train"><div class="k">rsLoRA 系数 α / √r</div><div class="v" id="sRs">–</div></div>
+      <div class="stat"><div class="k">和 α = r 相比</div><div class="v" id="sRel">–</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. memory -->
+<section class="stack" id="memory">
+  <h2><span class="step-no">5</span>显存账：省了什么，没省什么</h2>
+  <p class="prose">LoRA 省掉的是 W 的梯度、fp32 主权重和 Adam 状态，这部分在全参数训练里是大头。但<b>激活值一点没省</b>：反向传播仍要穿过冻结的 W，把梯度传给前面的层。所以上下文越长，两边一起涨。拖动上下文长度看看。</p>
+  <div class="panel">
+    <div class="controls">
+      <div class="ctrl"><label for="ctxIn">每条序列的上下文</label><input type="range" id="ctxIn" min="0" max="5" value="2"><output id="ctxOut" for="ctxIn">16K</output></div>
+    </div>
+    <div class="stack" id="memRows"></div>
+    <div class="legend">
+      <span><i class="seg-w"></i>bf16 权重 18.8</span>
+      <span><i class="seg-g"></i>fp32 梯度 37.6</span>
+      <span><i class="seg-m"></i>fp32 主权重 37.6</span>
+      <span><i class="seg-o"></i>Adam m+v 75.3</span>
+      <span><i class="seg-l"></i>LoRA 参数+梯度+Adam 2.6（r=64）</span>
+      <span><i class="seg-a"></i>激活（每层输入检查点，估算）</span>
+      <span><i style="border-left:2px dashed var(--ink);width:0;height:14px;border-radius:0"></i>单卡 80GB</span>
+    </div>
+    <p class="small muted">单位 GB。激活只算了全量重计算时每层保留的输入（32 层 × 长度 × 4096 × 2 字节），每层内部的临时内存和 logits 另计，实际会更多。推理引擎的权重和 KV cache 在训练阶段会被释放，没有画进来。</p>
+  </div>
+</section>
+
+<!-- 6. bf16 -->
+<section class="stack" id="bf16">
+  <h2><span class="step-no">6</span>合并进 bf16：小更新会被抹掉</h2>
+  <p class="prose">训练完可以把旁路并回去：W′ = W + (α/r)·B·A，推理零开销。但 bf16 只有 8 位有效数字，在 0.02 附近，相邻两个能表示的数相差约 1.2 × 10⁻⁴。比半个间隔还小的更新，加上去会被四舍五入回原值。RL 训练里如果每步都合并后同步给推理引擎，<b>推理端拿到的模型可能根本没变</b>。</p>
+  <div class="panel">
+    <div class="controls">
+      <div class="ctrl"><label for="dIn">更新量 Δ</label><input type="range" id="dIn" min="-7" max="-2" step="0.1" value="-5"><output id="dOut" for="dIn">1e-5</output></div>
+    </div>
+    <div class="fig"><svg id="lineSvg" viewBox="0 0 760 130" width="100%" role="img" aria-label="bf16 数轴"></svg></div>
+    <p class="verdict" id="bfVerdict">–</p>
+    <div class="stats">
+      <div class="stat train"><div class="k">2 万个 N(0, 0.02) 权重里，合并后没变的比例</div><div class="v" id="bfFrac">–</div></div>
+    </div>
+    <div class="fig">
+      <table>
+        <thead><tr><th>更新量</th><th class="num">PyTorch 演示脚本实测：没变的比例</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">1e-3</td><td class="num">0.0%</td></tr>
+          <tr><td class="mono">1e-4</td><td class="num">11.8%</td></tr>
+          <tr><td class="mono">1e-5</td><td class="num">84.6%</td></tr>
+          <tr><td class="mono">1e-6</td><td class="num">98.1%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- 7. RL -->
+<section class="stack" id="rl">
+  <h2><span class="step-no">7</span>放回 RL 里看</h2>
+  <div class="takeaways">
+    <div class="panel"><h3>r 不用太大</h3><p class="small">一条轨迹只换回一个奖励分数，能教给模型的信息很少，r = 16–64 通常够用。r = 64 只比 r = 16 多约 2GB，是买个保险。</p></div>
+    <div class="panel"><h3>参考模型是免费的</h3><p class="small">关掉 adapter 就是原模型。需要算 KL 时，不必再加载一份 18.8GB 的参考模型。</p></div>
+    <div class="panel"><h3>同步要小心精度</h3><p class="small">不合并时每步只需同步约 0.3GB 的 A、B。必须合并时，每次都从原始 W 加上 fp32 的 ΔW 重新算，并监控训练端和推理端 logprob 的差值。</p></div>
+  </div>
+</section>
+
+<footer>
+  参考：Hu et al., <i>LoRA: Low-Rank Adaptation of Large Language Models</i>（arXiv:2106.09685）。模型形状来自 MiMo-V2.6-Distill-Qwen-9B 的 config.json。仓库中的配套文件：<span class="mono">notes/lora-tutorial.md</span>、<span class="mono">examples/lora_demo.py</span>。
+</footer>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const hexToRgb = (h) => {
+    h = h.replace("#", "");
+    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+    const n = parseInt(h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  };
+  const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+  const fmtInt = (n) => n.toLocaleString("en-US");
+  const fmtBig = (n) => n >= 1e8 ? (n / 1e8).toFixed(2) + " 亿" : n >= 1e4 ? (n / 1e4).toFixed(1) + " 万" : fmtInt(n);
+  const fmtExp = (x) => (x === 0 ? "0" : x.toExponential(2));
+  const R_OPTS = [1, 2, 4, 8, 16, 32, 64, 128, 256];
+
+  /* ---------- 1. shapes ---------- */
+  const PRESETS = {
+    gate: { din: 4096, dout: 12288 },
+    q: { din: 4096, dout: 8192 },
+    down: { din: 12288, dout: 4096 },
+    toy: { din: 256, dout: 256 },
+  };
+  // LoRA params per unit of r across the 9B language model (computed from config.json shapes)
+  const MODEL_PER_R = 32 * 3 * (4096 + 12288) + 8 * ((4096 + 8192) + 2 * (4096 + 1024) + (4096 + 4096)) + 24 * ((4096 + 8192) + 2 * (4096 + 4096));
+  const MODEL_TOTAL = 9.41e9;
+
+  function drawShape() {
+    const p = PRESETS[$("preset").value];
+    const r = R_OPTS[+$("rIdx").value];
+    $("rOut").textContent = r;
+    const H = 240, sc = H / Math.max(p.din, p.dout);
+    const w = p.din * sc, h = p.dout * sc;
+    const rw = Math.max(3, r * sc);
+    const x0 = 20, y0 = 40;
+    const xB = x0 + w + 80, xA = xB + rw + 30;
+    const totalW = xA + w + 20, totalH = y0 + h + 50;
+    const svg = $("shapeSvg");
+    svg.setAttribute("viewBox", `0 0 ${totalW} ${totalH}`);
+    svg.setAttribute("width", "100%");
+    svg.style.maxWidth = Math.max(totalW, 420) + "px";
+    svg.innerHTML = `
+      <text x="${x0}" y="24" class="svg-ink" font-size="15" font-weight="700">W（冻结）</text>
+      <rect x="${x0}" y="${y0}" width="${w}" height="${h}" class="svg-frozen"/>
+      <text x="${x0 + w / 2}" y="${y0 + h + 22}" text-anchor="middle" class="svg-muted" font-size="12">d_in = ${p.din}</text>
+      <text x="${x0 + w + 8}" y="${y0 + h / 2}" class="svg-muted" font-size="12">d_out = ${p.dout}</text>
+      <text x="${xB - 34}" y="${y0 + h / 2 + 8}" class="svg-ink" font-size="22" font-weight="700">≈</text>
+      <text x="${xB}" y="24" class="svg-ink" font-size="15" font-weight="700">ΔW = B · A（训练）</text>
+      <rect x="${xB}" y="${y0}" width="${rw}" height="${h}" class="svg-train"/>
+      <text x="${xB + rw / 2}" y="${y0 + h + 22}" text-anchor="middle" class="svg-muted" font-size="12">r = ${r}</text>
+      <text x="${xA - 18}" y="${y0 + 14}" class="svg-ink" font-size="16" font-weight="700">×</text>
+      <rect x="${xA}" y="${y0}" width="${w}" height="${rw}" class="svg-train"/>
+      <text x="${xA + w / 2}" y="${y0 + rw + 18}" text-anchor="middle" class="svg-muted" font-size="12">A：r × d_in</text>
+      <text x="${xB + rw + 6}" y="${y0 + h - 6}" class="svg-muted" font-size="12">B：d_out × r</text>`;
+    const full = p.din * p.dout, lora = r * (p.din + p.dout);
+    $("sFull").textContent = fmtBig(full);
+    $("sLora").textContent = fmtBig(lora);
+    $("sRatio").textContent = (lora / full * 100).toFixed(lora / full < 0.01 ? 2 : 1) + "%";
+    const model = MODEL_PER_R * r;
+    $("sModel").textContent = `${fmtBig(model)} · ${(model / MODEL_TOTAL * 100).toFixed(2)}%`;
+    $("ratioFill").style.width = Math.min(100, lora / full * 100) + "%";
+  }
+  $("preset").addEventListener("change", drawShape);
+  $("rIdx").addEventListener("input", drawShape);
+
+  /* ---------- 3. lab ---------- */
+  const N = 16, STEPS = 1500, LR = 0.02;
+  let seed = 7;
+  function rng(s) {
+    return () => { s |= 0; s = (s + 0x6d2b79f5) | 0; let t = Math.imul(s ^ (s >>> 15), 1 | s); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+  function gauss(rand) { let u = 0; while (u === 0) u = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rand()); }
+  const zeros = (r, c) => Array.from({ length: r }, () => new Float64Array(c));
+  function matmul(X, Y) {
+    const n = X.length, m = Y[0].length, k = Y.length, Z = zeros(n, m);
+    for (let i = 0; i < n; i++) for (let p = 0; p < k; p++) { const x = X[i][p]; if (x === 0) continue; const row = Y[p]; const zi = Z[i]; for (let j = 0; j < m; j++) zi[j] += x * row[j]; }
+    return Z;
+  }
+  const T = (X) => { const Z = zeros(X[0].length, X.length); X.forEach((row, i) => row.forEach((v, j) => (Z[j][i] = v))); return Z; };
+  const norm = (X) => Math.sqrt(X.reduce((s, row) => s + row.reduce((a, v) => a + v * v, 0), 0));
+
+  function symEigs(S) {
+    const n = S.length, a = S.map((row) => Float64Array.from(row));
+    for (let sweep = 0; sweep < 80; sweep++) {
+      let off = 0;
+      for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) off += a[p][q] * a[p][q];
+      if (off < 1e-26) break;
+      for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+        if (Math.abs(a[p][q]) < 1e-300) continue;
+        const theta = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+        const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+        for (let k = 0; k < n; k++) { const kp = a[k][p], kq = a[k][q]; a[k][p] = c * kp - s * kq; a[k][q] = s * kp + c * kq; }
+        for (let k = 0; k < n; k++) { const pk = a[p][k], qk = a[q][k]; a[p][k] = c * pk - s * qk; a[q][k] = s * pk + c * qk; }
+      }
+    }
+    return Array.from({ length: n }, (_, i) => Math.max(0, a[i][i])).sort((x, y) => y - x);
+  }
+
+  const lab = {};
+  function labInit(newTarget) {
+    const k = +$("kIn").value, r = +$("rIn").value;
+    $("kOut").textContent = k; $("rOut2").textContent = r;
+    if (newTarget) seed += 1;
+    const rt = rng(seed * 101 + k);
+    const U = zeros(N, k), V = zeros(k, N);
+    for (let i = 0; i < N; i++) for (let j = 0; j < k; j++) U[i][j] = gauss(rt);
+    for (let i = 0; i < k; i++) for (let j = 0; j < N; j++) V[i][j] = gauss(rt);
+    lab.D = matmul(U, V).map((row) => row.map((v) => v * 0.5 / Math.sqrt(N)));
+    const ra = rng(seed * 977 + r), bound = 1 / Math.sqrt(N);
+    lab.A = zeros(r, N).map((row) => row.map(() => (ra() * 2 - 1) * bound));
+    lab.B = zeros(N, r);
+    lab.mA = zeros(r, N); lab.vA = zeros(r, N); lab.mB = zeros(N, r); lab.vB = zeros(N, r);
+    lab.t = 0; lab.r = r; lab.k = k; lab.hist = [];
+    const sig2 = symEigs(matmul(T(lab.D), lab.D));
+    lab.sv = sig2.map(Math.sqrt);
+    lab.bound = sig2.slice(r).reduce((s, v) => s + v, 0) / (N * N);
+    lab.running = false;
+    computeGrads();
+    lab.hist.push(lab.loss);
+    renderLab();
+  }
+  function computeGrads() {
+    const BA = matmul(lab.B, lab.A);
+    let loss = 0;
+    const E = BA.map((row, i) => row.map((v, j) => { const e = v - lab.D[i][j]; loss += e * e; return e * 2 / (N * N); }));
+    lab.BA = BA; lab.loss = loss / (N * N);
+    lab.gB = matmul(E, T(lab.A));
+    lab.gA = matmul(T(lab.B), E);
+  }
+  function adam(P, G, M, Vv, lr, t) {
+    const b1 = 0.9, b2 = 0.999, eps = 1e-12;
+    for (let i = 0; i < P.length; i++) for (let j = 0; j < P[i].length; j++) {
+      const g = G[i][j];
+      M[i][j] = b1 * M[i][j] + (1 - b1) * g;
+      Vv[i][j] = b2 * Vv[i][j] + (1 - b2) * g * g;
+      const mh = M[i][j] / (1 - Math.pow(b1, t)), vh = Vv[i][j] / (1 - Math.pow(b2, t));
+      P[i][j] -= lr * mh / (Math.sqrt(vh) + eps);
+    }
+  }
+  function labStep() {
+    if (lab.t >= STEPS) return false;
+    lab.t += 1;
+    const lr = LR * 0.5 * (1 + Math.cos(Math.PI * (lab.t - 1) / STEPS));
+    adam(lab.A, lab.gA, lab.mA, lab.vA, lr, lab.t);
+    adam(lab.B, lab.gB, lab.mB, lab.vB, lr, lab.t);
+    computeGrads();
+    lab.hist.push(lab.loss);
+    return true;
+  }
+
+  function drawHeat(canvas, M, maxAbs) {
+    const rows = M.length, cols = M[0].length, cell = 12;
+    canvas.width = cols * cell; canvas.height = rows * cell;
+    canvas.style.aspectRatio = `${cols} / ${rows}`;
+    canvas.style.maxWidth = Math.min(220, cols * 14) + "px";
+    const ctx = canvas.getContext("2d");
+    const surf = hexToRgb(css("--surface")), pos = hexToRgb(css("--pos")), neg = hexToRgb(css("--neg"));
+    for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
+      const v = M[i][j], t = Math.min(1, Math.abs(v) / (maxAbs || 1));
+      const c = mix(surf, v >= 0 ? pos : neg, Math.pow(t, 0.7));
+      ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      ctx.fillRect(j * cell, i * cell, cell, cell);
+    }
+  }
+  function setupCanvas(canvas) {
+    const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth || 480, h = Math.round(w * 220 / 480);
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+  }
+  function drawLoss() {
+    const { ctx, w, h } = setupCanvas($("cvLoss"));
+    const ink = css("--ink"), muted = css("--muted"), line = css("--line"), train = css("--train"), frozen = css("--frozen");
+    ctx.clearRect(0, 0, w, h);
+    const L = 44, R = 10, Tp = 10, Bm = 26;
+    const yMax = Math.ceil(Math.log10(Math.max(...lab.hist, 1e-12))) , yMin = -10;
+    const X = (t) => L + (w - L - R) * t / STEPS;
+    const Y = (v) => { const lv = Math.max(yMin, Math.log10(Math.max(v, 1e-300))); return Tp + (h - Tp - Bm) * (yMax - lv) / (yMax - yMin); };
+    ctx.font = "11px " + css("--font-mono"); ctx.fillStyle = muted; ctx.strokeStyle = line; ctx.lineWidth = 1;
+    for (let e = yMin; e <= yMax; e += 2) {
+      const y = Y(Math.pow(10, e)); ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(w - R, y); ctx.stroke();
+      ctx.fillText("1e" + e, 4, y + 4);
+    }
+    [0, 500, 1000, 1500].forEach((t) => { ctx.fillText(String(t), X(t) - 8, h - 8); });
+    if (lab.bound > 0) {
+      ctx.strokeStyle = frozen; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(L, Y(lab.bound)); ctx.lineTo(w - R, Y(lab.bound)); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = frozen; ctx.fillText("下限", w - R - 30, Y(lab.bound) - 5);
+    }
+    ctx.strokeStyle = train; ctx.lineWidth = 2; ctx.beginPath();
+    lab.hist.forEach((v, t) => { const x = X(t), y = Y(v); t ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+    ctx.fillStyle = ink;
+  }
+  function drawSv() {
+    const { ctx, w, h } = setupCanvas($("cvSv"));
+    const muted = css("--muted"), line = css("--line"), train = css("--train");
+    ctx.clearRect(0, 0, w, h);
+    const L = 10, R = 10, Tp = 14, Bm = 26, n = lab.sv.length, gap = 4;
+    const bw = (w - L - R - gap * (n - 1)) / n, maxV = Math.max(...lab.sv, 1e-9);
+    ctx.font = "11px " + css("--font-mono");
+    for (let i = 0; i < n; i++) {
+      const bh = (h - Tp - Bm) * lab.sv[i] / maxV, x = L + i * (bw + gap), y = h - Bm - bh;
+      ctx.fillStyle = i < lab.r ? train : muted;
+      ctx.globalAlpha = i < lab.r ? 1 : 0.45;
+      ctx.fillRect(x, y, bw, Math.max(bh, lab.sv[i] > maxV * 1e-6 ? 1 : 0));
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = muted; ctx.fillText(String(i + 1), x + bw / 2 - 4, h - 8);
+    }
+    ctx.strokeStyle = line; ctx.beginPath(); ctx.moveTo(L, h - Bm + 0.5); ctx.lineTo(w - R, h - Bm + 0.5); ctx.stroke();
+  }
+  function renderLab() {
+    const m = Math.max(...lab.D.map((row) => Math.max(...row.map(Math.abs))));
+    drawHeat($("cvD"), lab.D, m);
+    drawHeat($("cvBA"), lab.BA, m);
+    const mB = Math.max(1e-9, ...lab.B.map((row) => Math.max(...row.map(Math.abs))));
+    drawHeat($("cvB"), lab.B, mB);
+    const mA = Math.max(...lab.A.map((row) => Math.max(...row.map(Math.abs))));
+    drawHeat($("cvA"), lab.A, mA);
+    drawLoss(); drawSv();
+    $("rdStep").textContent = lab.t;
+    $("rdLoss").textContent = fmtExp(lab.loss);
+    $("rdBound").textContent = lab.bound > 1e-14 ? fmtExp(lab.bound) : "≈ 0";
+    $("rdGA").textContent = fmtExp(norm(lab.gA));
+    $("rdGB").textContent = fmtExp(norm(lab.gB));
+    let msg;
+    if (lab.t === 0) msg = `第 0 步：B 全是 0，所以 B·A = 0、模型没变；‖∇A‖ = 0，只有 B 有梯度。r = ${lab.r}，k = ${lab.k}。`;
+    else if (lab.t < STEPS) msg = `训练中…第 ${lab.t} 步。`;
+    else if (lab.r >= lab.k) msg = `r = ${lab.r} ≥ k = ${lab.k}：loss 降到 ${fmtExp(lab.loss)}，B·A 几乎完全还原了 ΔW。再加大 r 也不会更好。`;
+    else msg = `r = ${lab.r} < k = ${lab.k}：loss 停在 ${fmtExp(lab.loss)}，贴着理论下限 ${fmtExp(lab.bound)}。只有前 ${lab.r} 个奇异方向能学到，剩下的再怎么训练也学不到。`;
+    $("verdict").textContent = msg;
+  }
+  function train() {
+    if (lab.running) return;
+    if (lab.t >= STEPS) labInit(false);
+    lab.running = true; $("trainBtn").disabled = true;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frame = () => {
+      for (let i = 0; i < (reduce ? STEPS : 25); i++) if (!labStep()) break;
+      renderLab();
+      if (lab.t < STEPS) requestAnimationFrame(frame);
+      else { lab.running = false; $("trainBtn").disabled = false; renderLab(); }
+    };
+    requestAnimationFrame(frame);
+  }
+  $("trainBtn").addEventListener("click", train);
+  $("stepBtn").addEventListener("click", () => { if (!lab.running) { labStep(); renderLab(); } });
+  $("newBtn").addEventListener("click", () => { if (!lab.running) labInit(true); });
+  $("kIn").addEventListener("input", () => { if (!lab.running) labInit(false); });
+  $("rIn").addEventListener("input", () => { if (!lab.running) labInit(false); });
+
+  /* ---------- 4. alpha ---------- */
+  function drawAlpha() {
+    const a = +$("aIn").value, r = R_OPTS[+$("ar").value];
+    $("aOut").textContent = a; $("arOut").textContent = r;
+    $("sStd").textContent = (a / r).toFixed(a / r < 1 ? 3 : 2);
+    $("sRs").textContent = (a / Math.sqrt(r)).toFixed(2);
+    const rel = a / r;
+    $("sRel").textContent = rel === 1 ? "相同" : (rel > 1 ? `大 ${rel.toFixed(2)} 倍` : `小 ${(1 / rel).toFixed(2)} 倍`);
+  }
+  $("aIn").addEventListener("input", drawAlpha);
+  $("ar").addEventListener("input", drawAlpha);
+
+  /* ---------- 5. memory ---------- */
+  const CTX = [4096, 8192, 16384, 32768, 65536, 131072];
+  const CTX_LABEL = ["4K", "8K", "16K", "32K", "64K", "128K"];
+  function drawMem() {
+    const i = +$("ctxIn").value; $("ctxOut").textContent = CTX_LABEL[i];
+    const act = 32 * CTX[i] * 4096 * 2 / 1e9;
+    const full = [["w", 18.8], ["g", 37.6], ["m", 37.6], ["o", 75.3], ["a", act]];
+    const lora = [["w", 18.8], ["l", 2.6], ["a", act]];
+    const sum = (xs) => xs.reduce((s, x) => s + x[1], 0);
+    const maxT = Math.max(sum(full), 100);
+    const row = (name, segs) => {
+      const tot = sum(segs);
+      const bars = segs.map(([c, v]) => `<div class="seg seg-${c}" style="width:${v / maxT * 100}%" title="${v.toFixed(1)} GB"></div>`).join("");
+      return `<div class="mem-row"><div class="name">${name}</div><div class="mem-track">${bars}<div class="gpu-line" style="left:${80 / maxT * 100}%"></div></div><div class="tot">${tot.toFixed(1)}</div></div>`;
+    };
+    $("memRows").innerHTML = row("全参数", full) + row("LoRA", lora);
+  }
+  $("ctxIn").addEventListener("input", drawMem);
+
+  /* ---------- 6. bf16 ---------- */
+  const f32 = new Float32Array(1), u32 = new Uint32Array(f32.buffer);
+  function bf16(x) {
+    f32[0] = x; let b = u32[0];
+    b = (b + 0x7fff + ((b >>> 16) & 1)) >>> 0;
+    u32[0] = b & 0xffff0000; return f32[0];
+  }
+  function bf16Next(x) { f32[0] = bf16(x); u32[0] = (u32[0] + 0x10000) >>> 0; return f32[0]; }
+  const wr = rng(2024), W0 = Array.from({ length: 20000 }, () => bf16(gauss(wr) * 0.02));
+  function drawBf16() {
+    const e = +$("dIn").value, d = Math.pow(10, e);
+    $("dOut").textContent = d.toExponential(1);
+    const w = bf16(0.02), ulp = bf16Next(w) - w;
+    const exact = w + d, merged = bf16(w + bf16(d));
+    const half = Math.max(2.5 * ulp, 1.25 * d);
+    const lo = w - half * 0.35, hi = w + half;
+    const Xp = (v) => 40 + 680 * (v - lo) / (hi - lo);
+    let ticks = "";
+    const nT = Math.round((hi - lo) / ulp);
+    const stride = Math.max(1, Math.ceil(nT / 40));
+    let g = bf16(lo); let idx = 0;
+    while (g <= hi && idx < 4000) {
+      if (g >= lo && idx % stride === 0) ticks += `<line x1="${Xp(g)}" x2="${Xp(g)}" y1="54" y2="74" stroke="var(--muted)" stroke-width="1"/>`;
+      g = bf16Next(g); idx++;
+    }
+    const kept = merged !== w;
+    $("lineSvg").innerHTML = `
+      <line x1="40" x2="720" y1="64" y2="64" stroke="var(--line)" stroke-width="2"/>
+      ${ticks}
+      <text x="40" y="100" class="svg-muted" font-size="12">短竖线 = bf16 能表示的数（${stride > 1 ? "每 " + stride + " 个画一个" : "相邻间隔 " + ulp.toExponential(2)}）</text>
+      <circle cx="${Xp(w)}" cy="64" r="7" fill="var(--frozen)"/>
+      <text x="${Xp(w)}" y="40" text-anchor="middle" class="svg-ink" font-size="12">W = ${w.toFixed(6)}</text>
+      <circle cx="${Xp(exact)}" cy="64" r="7" fill="none" stroke="var(--train)" stroke-width="2"/>
+      <text x="${Xp(exact)}" y="${kept ? 22 : 122}" text-anchor="middle" fill="var(--train)" font-size="12">W + Δ（精确值）</text>
+      <circle cx="${Xp(merged)}" cy="64" r="4" fill="var(--train)"/>`;
+    $("bfVerdict").textContent = kept
+      ? `Δ = ${d.toExponential(1)}：比半个间隔（${(ulp / 2).toExponential(2)}）大，合并后落到了新的格点上，更新保留了下来。`
+      : `Δ = ${d.toExponential(1)}：比半个间隔（${(ulp / 2).toExponential(2)}）小，W + Δ 被四舍五入回原来的 W，这次更新在 bf16 里消失了。`;
+    let same = 0; const db = bf16(d);
+    for (const x of W0) if (bf16(x + db) === x) same++;
+    $("bfFrac").textContent = (same / W0.length * 100).toFixed(1) + "%";
+  }
+  $("dIn").addEventListener("input", drawBf16);
+
+  /* ---------- boot & theme ---------- */
+  function renderAll() { drawShape(); renderLab(); drawAlpha(); drawMem(); drawBf16(); }
+  labInit(false);
+  renderAll();
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+  new MutationObserver(renderAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { drawLoss(); drawSv(); }, 120); });
+})();
+</script>
