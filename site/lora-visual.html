@@ -201,9 +201,60 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   </div>
 </section>
 
-<!-- 2. flow -->
+<!-- 2. why low rank works -->
+<section class="stack" id="why">
+  <h2><span class="step-no">2</span>为什么几对向量就能近似一个大矩阵</h2>
+  <p class="prose">先看最小的情况 r = 1：B 只有一列 <span class="train-t">u</span>（d_out 个数），A 只有一行 <span class="train-t">v</span>（d_in 个数）。两者相乘 u·vᵀ 叫<b>外积</b>，结果是一个完整的矩阵，第 i 行第 j 列就是 u<sub>i</sub> × v<sub>j</sub>。所以 m + n 个数就能"铺开"成 m × n 个数。点一下矩阵里的格子看看它是怎么来的。</p>
+  <div class="panel">
+    <div class="controls">
+      <button id="opNew" type="button">换一对向量</button>
+      <span class="small muted">u 有 8 个数，v 有 10 个数，铺开成 8 × 10 = 80 个数</span>
+    </div>
+    <div class="fig"><svg id="opSvg" role="img" aria-label="外积示意：u 乘 v 的转置"></svg></div>
+    <p class="mono" id="opRead">–</p>
+    <p class="small muted">代价是它很"死板"：每一行都是 v 乘一个系数，每一列都是 u 乘一个系数。这样的矩阵秩为 1，只能表达一个方向上的变化。</p>
+  </div>
+
+  <p class="prose">r 对向量各自做外积再相加，就是 B·A：B 的第 k 列和 A 的第 k 行配成一对。反过来，<b>任何矩阵都能拆成若干层外积之和</b>，这就是奇异值分解（SVD）：M = σ₁u₁v₁ᵀ + σ₂u₂v₂ᵀ + …，每层的分量 σ 从大到小排列。只保留前 r 层，就是所有秩为 r 的矩阵里离 M 最近的那个（Eckart–Young 定理），误差正好等于被丢掉的那些 σ² 之和。</p>
+  <div class="panel">
+    <div class="controls">
+      <div class="ctrl">
+        <label for="svdKind">拿什么矩阵来拆</label>
+        <select id="svdKind">
+          <option value="img">有结构：一张 48 × 96 的图</option>
+          <option value="low">低秩变化 + 少量噪声</option>
+          <option value="noise">纯随机噪声</option>
+        </select>
+      </div>
+      <div class="ctrl"><label for="svdR">保留前 r 层</label><input type="range" id="svdR" min="1" max="48" value="4"><output id="svdROut" for="svdR">4</output></div>
+    </div>
+    <div class="lab-grid">
+      <div class="cell wide"><canvas id="cvOrig" width="96" height="48"></canvas><div class="cap">原矩阵 M（48 × 96 = 4608 个数）</div></div>
+      <div class="cell wide"><canvas id="cvRec" width="96" height="48"></canvas><div class="cap" id="recCap">前 r 层之和</div></div>
+    </div>
+    <div class="readout">
+      <div>保留的能量 Σσ²<b id="svEnergy">–</b></div>
+      <div>相对误差<b id="svErr">–</b></div>
+      <div>需要存的数<b id="svParams">–</b></div>
+    </div>
+    <div class="cell wide"><canvas id="cvSpec" width="480" height="180"></canvas><div class="cap">奇异值 σ（前 48 个）。橙色是保留的层；掉得越快，前几层越能代表整个矩阵</div></div>
+    <div class="stack">
+      <div class="cap small muted">前 4 层各自长什么样（每一层都是一个外积 σ·u·vᵀ）</div>
+      <div class="lab-grid" id="layerGrid"></div>
+    </div>
+  </div>
+
+  <p class="prose">切到"纯随机噪声"会发现：奇异值几乎一样大，砍掉哪一层都损失差不多，低秩近似就不灵了。<b>所以 LoRA 能用，前提是要学的变化 ΔW 本身有结构。</b>为什么微调的 ΔW 往往如此？</p>
+  <div class="takeaways">
+    <div class="panel"><h3>每个 token 的梯度本来就是外积</h3><p class="small">线性层 y = W·x 对单个 token 的梯度是 ∂L/∂W = δ·xᵀ，δ 是从后面传回来的误差向量。这恰好是一对向量的外积，秩为 1。一批数据的梯度就是很多层外积相加。</p></div>
+    <div class="panel"><h3>这些向量挤在少数方向上</h3><p class="small">同一个任务反复用到相似的特征，x 和 δ 并不均匀散布在 4096 维空间里，而是集中在少数方向。很多层外积相加后，奇异值仍然衰减得很快，前几层就占了大部分能量。</p></div>
+    <div class="panel"><h3>这是经验规律，不是定理</h3><p class="small">LoRA 论文发现 GPT-3 上 r 取 1–2 就有不错的效果；Aghajanyan 等人（2020）发现微调的"内在维度"很低。但任务离预训练越远，比如学一门全新的语言，需要的 r 就越大。</p></div>
+  </div>
+</section>
+
+<!-- 3. flow -->
 <section class="stack" id="flow">
-  <h2><span class="step-no">2</span>数据怎么走：两条路相加</h2>
+  <h2><span class="step-no">3</span>数据怎么走：两条路相加</h2>
   <p class="prose">输入 x 同时走两条路。上面是原来的 <span class="frozen-t">W</span>，参数冻结、没有梯度；下面先被 <span class="train-t">A</span> 压到 r 维，再被 <span class="train-t">B</span> 展开回 d_out 维，乘上缩放系数 α/r 后与上面的结果相加。计算顺序是先 A 后 B，<b>训练时从不把 B·A 这个大矩阵乘出来</b>。</p>
   <div class="panel">
     <div class="fig">
@@ -238,9 +289,9 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   </div>
 </section>
 
-<!-- 3. lab -->
+<!-- 4. lab -->
 <section class="stack" id="lab">
-  <h2><span class="step-no">3</span>动手训练：r 够不够</h2>
+  <h2><span class="step-no">4</span>动手训练：r 够不够</h2>
   <p class="prose">这里在浏览器里真跑一个小 LoRA（16 × 16）。先随机造一个"真实变化" ΔW，它的秩是 k；再用秩为 r 的 B·A 去逼近它（Adam + 余弦退火，1500 步）。注意两件事：<b>第 0 步 A 的梯度恰好是 0</b>，因为 B 初始化为 0；<b>r 小于 k 时 loss 会停在一条线上</b>，那条线就是"秩为 r 的矩阵最好能做到的程度"。</p>
   <div class="panel">
     <div class="controls">
@@ -271,9 +322,9 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   </div>
 </section>
 
-<!-- 4. alpha -->
+<!-- 5. alpha -->
 <section class="stack" id="alpha">
-  <h2><span class="step-no">4</span>α / r：旁路的音量旋钮</h2>
+  <h2><span class="step-no">5</span>α / r：旁路的音量旋钮</h2>
   <p class="prose">旁路输出要乘一个缩放系数。标准 LoRA 用 α/r，rsLoRA 用 α/√r。如果固定 α 去改 r，系数会跟着变，相当于悄悄改了学习率。常见做法是 α = r（系数为 1），并且把 LoRA 的学习率设得比全参数高一个数量级左右。</p>
   <div class="panel">
     <div class="controls">
@@ -288,9 +339,9 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   </div>
 </section>
 
-<!-- 5. memory -->
+<!-- 6. memory -->
 <section class="stack" id="memory">
-  <h2><span class="step-no">5</span>显存账：省了什么，没省什么</h2>
+  <h2><span class="step-no">6</span>显存账：省了什么，没省什么</h2>
   <p class="prose">LoRA 省掉的是 W 的梯度、fp32 主权重和 Adam 状态，这部分在全参数训练里是大头。但<b>激活值一点没省</b>：反向传播仍要穿过冻结的 W，把梯度传给前面的层。所以上下文越长，两边一起涨。拖动上下文长度看看。</p>
   <div class="panel">
     <div class="controls">
@@ -310,9 +361,9 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   </div>
 </section>
 
-<!-- 6. bf16 -->
+<!-- 7. bf16 -->
 <section class="stack" id="bf16">
-  <h2><span class="step-no">6</span>合并进 bf16：小更新会被抹掉</h2>
+  <h2><span class="step-no">7</span>合并进 bf16：小更新会被抹掉</h2>
   <p class="prose">训练完可以把旁路并回去：W′ = W + (α/r)·B·A，推理零开销。但 bf16 只有 8 位有效数字，在 0.02 附近，相邻两个能表示的数相差约 1.2 × 10⁻⁴。比半个间隔还小的更新，加上去会被四舍五入回原值。RL 训练里如果每步都合并后同步给推理引擎，<b>推理端拿到的模型可能根本没变</b>。</p>
   <div class="panel">
     <div class="controls">
@@ -337,9 +388,9 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   </div>
 </section>
 
-<!-- 7. RL -->
+<!-- 8. RL -->
 <section class="stack" id="rl">
-  <h2><span class="step-no">7</span>放回 RL 里看</h2>
+  <h2><span class="step-no">8</span>放回 RL 里看</h2>
   <div class="takeaways">
     <div class="panel"><h3>r 不用太大</h3><p class="small">一条轨迹只换回一个奖励分数，能教给模型的信息很少，r = 16–64 通常够用。r = 64 只比 r = 16 多约 2GB，是买个保险。</p></div>
     <div class="panel"><h3>参考模型是免费的</h3><p class="small">关掉 adapter 就是原模型。需要算 KL 时，不必再加载一份 18.8GB 的参考模型。</p></div>
@@ -680,8 +731,164 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   }
   $("dIn").addEventListener("input", drawBf16);
 
+  /* ---------- 2a. outer product ---------- */
+  const OP_M = 8, OP_N = 10;
+  const op = { seed: 3, sel: [2, 6] };
+  function opInit() {
+    const r = rng(op.seed * 31);
+    op.u = Array.from({ length: OP_M }, () => +(r() * 2 - 1).toFixed(2));
+    op.v = Array.from({ length: OP_N }, () => +(r() * 2 - 1).toFixed(2));
+  }
+  function divColor(v, maxAbs) {
+    const surf = hexToRgb(css("--surface")), pos = hexToRgb(css("--pos")), neg = hexToRgb(css("--neg"));
+    const c = mix(surf, v >= 0 ? pos : neg, Math.pow(Math.min(1, Math.abs(v) / (maxAbs || 1)), 0.7));
+    return `rgb(${c[0]},${c[1]},${c[2]})`;
+  }
+  function drawOuter() {
+    const cs = 28, gap = 10, x0 = 30 + cs + gap, y0 = 22 + cs + gap;
+    const W = x0 + OP_N * cs + 20, H = y0 + OP_M * cs + 10;
+    const svg = $("opSvg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("width", "100%"); svg.style.maxWidth = W * 1.25 + "px";
+    const [si, sj] = op.sel, line = css("--ink");
+    let h = `<text x="${x0}" y="14" class="svg-muted" font-size="12">vᵀ（A 的一行）</text>
+             <text x="2" y="${y0 - 6}" class="svg-muted" font-size="12">u</text>`;
+    op.v.forEach((v, j) => {
+      h += `<rect x="${x0 + j * cs}" y="22" width="${cs - 2}" height="${cs - 2}" fill="${divColor(v, 1)}" stroke="${j === sj ? line : "none"}" stroke-width="2"/>`;
+    });
+    op.u.forEach((u, i) => {
+      h += `<rect x="30" y="${y0 + i * cs}" width="${cs - 2}" height="${cs - 2}" fill="${divColor(u, 1)}" stroke="${i === si ? line : "none"}" stroke-width="2"/>`;
+      op.v.forEach((v, j) => {
+        const on = i === si && j === sj;
+        h += `<rect data-i="${i}" data-j="${j}" tabindex="0" role="button" aria-label="第 ${i + 1} 行第 ${j + 1} 列" x="${x0 + j * cs}" y="${y0 + i * cs}" width="${cs - 2}" height="${cs - 2}" fill="${divColor(u * v, 1)}" stroke="${on ? line : "none"}" stroke-width="2" style="cursor:pointer"/>`;
+      });
+    });
+    svg.innerHTML = h;
+    const u = op.u[si], v = op.v[sj];
+    $("opRead").textContent = `M[${si + 1}][${sj + 1}] = u${si + 1} × v${sj + 1} = ${u.toFixed(2)} × ${v.toFixed(2)} = ${(u * v).toFixed(3)}`;
+  }
+  function opPick(e) {
+    const t = e.target.closest("rect[data-i]"); if (!t) return;
+    op.sel = [+t.dataset.i, +t.dataset.j]; drawOuter();
+    const again = $("opSvg").querySelector(`rect[data-i="${op.sel[0]}"][data-j="${op.sel[1]}"]`); if (again && e.type === "keydown") again.focus();
+  }
+  $("opSvg").addEventListener("click", opPick);
+  $("opSvg").addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); opPick(e); } });
+  $("opNew").addEventListener("click", () => { op.seed += 1; opInit(); drawOuter(); });
+
+  /* ---------- 2b. SVD: any matrix = sum of rank-1 layers ---------- */
+  const SM = 48, SN = 96;
+  const svd = {};
+  function eigSym(S) {
+    // Jacobi eigen-decomposition: returns eigenvalues (desc) and eigenvectors as columns
+    const n = S.length, a = S.map((row) => Float64Array.from(row));
+    const V = zeros(n, n); for (let i = 0; i < n; i++) V[i][i] = 1;
+    for (let sweep = 0; sweep < 100; sweep++) {
+      let off = 0;
+      for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) off += a[p][q] * a[p][q];
+      if (off < 1e-22) break;
+      for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) {
+        if (Math.abs(a[p][q]) < 1e-300) continue;
+        const theta = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+        const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+        for (let k = 0; k < n; k++) { const kp = a[k][p], kq = a[k][q]; a[k][p] = c * kp - s * kq; a[k][q] = s * kp + c * kq; }
+        for (let k = 0; k < n; k++) { const pk = a[p][k], qk = a[q][k]; a[p][k] = c * pk - s * qk; a[q][k] = s * pk + c * qk; }
+        for (let k = 0; k < n; k++) { const kp = V[k][p], kq = V[k][q]; V[k][p] = c * kp - s * kq; V[k][q] = s * kp + c * kq; }
+      }
+    }
+    const order = Array.from({ length: n }, (_, i) => i).sort((x, y) => a[y][y] - a[x][x]);
+    return { vals: order.map((i) => Math.max(0, a[i][i])), vecs: order.map((i) => V.map((row) => row[i])) };
+  }
+  function makeMatrix(kind) {
+    const r = rng(kind === "noise" ? 11 : 5);
+    if (kind === "noise") return zeros(SM, SN).map((row) => row.map(() => gauss(r)));
+    if (kind === "low") {
+      const M = zeros(SM, SN);
+      for (let k = 0; k < 3; k++) {
+        const u = Array.from({ length: SM }, () => gauss(r)), v = Array.from({ length: SN }, () => gauss(r)), s = [1, 0.6, 0.35][k];
+        for (let i = 0; i < SM; i++) for (let j = 0; j < SN; j++) M[i][j] += s * u[i] * v[j];
+      }
+      return M.map((row) => row.map((x) => x + 0.12 * gauss(r)));
+    }
+    const cv = document.createElement("canvas"); cv.width = SN; cv.height = SM;
+    const ctx = cv.getContext("2d");
+    const g = ctx.createLinearGradient(0, 0, SN, SM); g.addColorStop(0, "#202020"); g.addColorStop(1, "#5a5a5a");
+    ctx.fillStyle = g; ctx.fillRect(0, 0, SN, SM);
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(14, 24, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.font = "bold 30px Arial, Helvetica, sans-serif"; ctx.textBaseline = "middle"; ctx.fillText("LoRA", 28, 26);
+    const px = ctx.getImageData(0, 0, SN, SM).data;
+    return zeros(SM, SN).map((row, i) => row.map((_, j) => px[(i * SN + j) * 4] / 255));
+  }
+  function svdInit() {
+    const M = makeMatrix($("svdKind").value);
+    const { vals, vecs } = eigSym(matmul(M, T(M)));
+    svd.M = M; svd.lam = vals; svd.U = vecs;
+    svd.Wt = vecs.map((u) => { const w = new Float64Array(SN); for (let i = 0; i < SM; i++) { const ui = u[i]; for (let j = 0; j < SN; j++) w[j] += ui * M[i][j]; } return w; });
+    svd.total = vals.reduce((s, x) => s + x, 0);
+    let lo = Infinity, hi = -Infinity; M.forEach((row) => row.forEach((x) => { lo = Math.min(lo, x); hi = Math.max(hi, x); }));
+    svd.lo = lo; svd.hi = hi;
+    drawSvd();
+  }
+  function rankApprox(r) {
+    const R = zeros(SM, SN);
+    for (let k = 0; k < r; k++) { const u = svd.U[k], w = svd.Wt[k]; for (let i = 0; i < SM; i++) { const ui = u[i]; if (ui === 0) continue; const Ri = R[i]; for (let j = 0; j < SN; j++) Ri[j] += ui * w[j]; } }
+    return R;
+  }
+  function paintMatrix(canvas, M, lo, hi, diverging) {
+    canvas.width = SN; canvas.height = SM; canvas.style.aspectRatio = `${SN} / ${SM}`; canvas.style.maxWidth = "100%";
+    const ctx = canvas.getContext("2d"), img = ctx.createImageData(SN, SM);
+    const surf = hexToRgb(css("--surface")), ink = hexToRgb(css("--ink")), pos = hexToRgb(css("--pos")), neg = hexToRgb(css("--neg"));
+    let maxAbs = 0; if (diverging) M.forEach((row) => row.forEach((x) => (maxAbs = Math.max(maxAbs, Math.abs(x)))));
+    for (let i = 0; i < SM; i++) for (let j = 0; j < SN; j++) {
+      const x = M[i][j]; let c;
+      if (diverging) c = mix(surf, x >= 0 ? pos : neg, Math.pow(Math.min(1, Math.abs(x) / (maxAbs || 1)), 0.7));
+      else c = mix(surf, ink, Math.min(1, Math.max(0, (x - lo) / ((hi - lo) || 1))));
+      const o = (i * SN + j) * 4; img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    canvas.style.imageRendering = "pixelated";
+  }
+  function drawSvd() {
+    if (!svd.M) return;
+    const r = +$("svdR").value; $("svdROut").textContent = r;
+    const div = $("svdKind").value !== "img";
+    paintMatrix($("cvOrig"), svd.M, svd.lo, svd.hi, div);
+    paintMatrix($("cvRec"), rankApprox(r), svd.lo, svd.hi, div);
+    const kept = svd.lam.slice(0, r).reduce((s, x) => s + x, 0);
+    $("svEnergy").textContent = (kept / svd.total * 100).toFixed(1) + "%";
+    $("svErr").textContent = (Math.sqrt(Math.max(0, svd.total - kept) / svd.total) * 100).toFixed(1) + "%";
+    const p = r * (SM + SN);
+    $("svParams").textContent = `${fmtInt(p)} / ${fmtInt(SM * SN)}`;
+    $("recCap").textContent = `前 ${r} 层之和：存 ${r} × (48 + 96) = ${fmtInt(p)} 个数`;
+    // spectrum
+    const { ctx, w, h } = setupCanvas($("cvSpec"));
+    ctx.clearRect(0, 0, w, h);
+    const sig = svd.lam.map(Math.sqrt), maxS = sig[0] || 1, L = 6, Rr = 6, Tp = 8, Bm = 20, gap = 2, n = sig.length;
+    const bw = (w - L - Rr - gap * (n - 1)) / n;
+    ctx.font = "11px " + css("--font-mono");
+    for (let i = 0; i < n; i++) {
+      const bh = (h - Tp - Bm) * sig[i] / maxS, x = L + i * (bw + gap);
+      ctx.fillStyle = i < r ? css("--train") : css("--muted"); ctx.globalAlpha = i < r ? 1 : 0.4;
+      ctx.fillRect(x, h - Bm - bh, bw, bh); ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = css("--muted"); ctx.fillText("1", L, h - 5); ctx.fillText(String(n), w - Rr - 14, h - 5);
+    // first 4 layers
+    const grid = $("layerGrid");
+    if (!grid.children.length) grid.innerHTML = [0, 1, 2, 3].map((k) => `<div class="cell wide"><canvas id="cvLayer${k}"></canvas><div class="cap" id="capLayer${k}"></div></div>`).join("");
+    for (let k = 0; k < 4; k++) {
+      const u = svd.U[k], wv = svd.Wt[k];
+      const Lk = zeros(SM, SN).map((row, i) => row.map((_, j) => u[i] * wv[j]));
+      paintMatrix($("cvLayer" + k), Lk, 0, 1, true);
+      $("capLayer" + k).textContent = `第 ${k + 1} 层：σ = ${Math.sqrt(svd.lam[k]).toFixed(2)}，占能量 ${(svd.lam[k] / svd.total * 100).toFixed(1)}%`;
+    }
+  }
+  $("svdKind").addEventListener("change", svdInit);
+  $("svdR").addEventListener("input", drawSvd);
+
   /* ---------- boot & theme ---------- */
-  function renderAll() { drawShape(); renderLab(); drawAlpha(); drawMem(); drawBf16(); }
+  function renderAll() { drawShape(); drawOuter(); drawSvd(); renderLab(); drawAlpha(); drawMem(); drawBf16(); }
+  opInit();
+  svdInit();
   labInit(false);
   renderAll();
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
