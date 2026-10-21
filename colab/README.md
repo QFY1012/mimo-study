@@ -29,11 +29,12 @@
 - HTML 抽取：6 个用例。
 - LoRA 无漂移同步：CPU 上 100 次合并/拆分后，TRL 原生做法改变了 0.4% 的基座权重，修补后不变。
 - TRL 1.14.2 的完整接线：CPU 上用小模型跑通 2 步训练、记录指标、保存 checkpoint。
+- 真判官（deepseek-v4.1-flash）下的奖励自检：Colab CPU 机上通过，4 个样例得分 [1.0, 0, 0, 0]。
 - 判官 endpoint：kimi-k3、glm-5.3-flash、qwen3.8-max、deepseek-v4.1-flash 都能看图，并输出合法 JSON。
 
 默认判官：`deepseek-v4.1-flash`（最快；实测 8 张图一次挑选约 5 秒）。换模型设环境变量 `JUDGE_MODEL` 或改配置格。
 
-**已在 A100 80GB 上确认**（2026-10-21）：依赖按上面的版本装好约 6 分钟；vLLM 0.30.0 能加载这个模型，权重 16.8 GiB，KV cache 45.4 GiB（约 121 万 token，16K 长度下最多 74 条并发）。
+**已在 A100 80GB 上确认**（2026-10-21）：依赖用 pip 装约 6 分钟（现在改成 uv，CPU 机上冷装实测 106 秒，不需要 Drive 缓存）；vLLM 0.30.0 能加载这个模型，权重 16.8 GiB，KV cache 45.4 GiB（约 121 万 token，16K 长度下最多 74 条并发）。
 
 **需要在 GPU 上第一次运行时确认**：
 - flash-linear-attention 能否装上。

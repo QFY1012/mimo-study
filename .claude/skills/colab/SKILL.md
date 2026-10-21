@@ -84,7 +84,9 @@ colab exec -s colab -f job.py --timeout 3600
 - `colab url -s <name>` can open a separate runtime in the browser. It then shows up in `colab sessions` as `[?]`, and `colab stop` cannot stop it ("Session not found"). Only the user can close it, from the Colab web UI: Runtime → Manage sessions → Terminate (运行时 → 管理会话 → 终止).
 - Python scripts that start child processes with `spawn` (vLLM's engine, multiprocessing) must not be launched as `python script.py` when they lack an `if __name__ == "__main__":` guard: each child re-executes the whole script and fails with "An attempt has been made to start a new process before the current process has finished its bootstrapping phase". Launch with `python -c "p='/content/x.py'; exec(compile(open(p).read(), p, 'exec'))"`, and avoid initializing CUDA in the parent before the engine starts.
 - `colab download` reads files without going through the kernel, so it still works while a long cell is blocking the kernel. Use it to read logs in that situation.
-- An install into a folder (`pip install --target /content/pkgs ...`) can be tarred up and reused on the next VM. Each new runtime is a fresh machine, so nothing installed on a CPU VM carries over to a GPU VM unless you move it through Drive or another store.
+- Each new runtime is a fresh machine: nothing installed on one VM carries over to the next, and Drive has to be re-granted every time. Instead of caching packages, install with uv: `python -m pip install -q uv && python -m uv pip install --python "$(which python)" --target /content/pkgs ...`. A cold install of vLLM + transformers + TRL (8 GB) took 106 s with uv against about 6 min with pip, so a cache is not worth the Drive round trip. Put `/content/pkgs` first on `sys.path` and in `PYTHONPATH` so spawned children see it.
+- A background job started with plain `subprocess.Popen` from the kernel can die with the kernel (for example after `colab restart-kernel`). Start long jobs with `setsid` / `start_new_session=True` and log to a file you read with `colab download`.
+- Mounting Drive is per runtime and can't be made permanent: each new VM needs a fresh grant within the 120 s window.
 
 ## 6. Finish
 

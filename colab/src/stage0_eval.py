@@ -34,13 +34,12 @@ if not DRY_RUN_HTML_DIR:
 # %% [markdown]
 # ## 安装依赖
 # 版本都选的是发布超过两周、互相兼容的：vLLM 0.30.0 支持 Qwen3.5 架构，且在 TRL 1.14.2 支持的范围内（训练 notebook 用同一套）。
-# 如果 Drive 里有 `webdev_cache/pkgs.tar.zst`，直接解压，不用现场安装。
+# 用 uv 装进 `/content/pkgs`：冷装约 2 分钟（pip 要 6 分钟），所以不需要 Drive 缓存。
 
 # %%
 PINS = ["vllm==0.30.0", "transformers==5.18.0", "peft==0.21.2", "trl==1.14.2", "accelerate==1.15.0",
         "flash-linear-attention", "openai", "pandas", "pyarrow", "pillow", "playwright", "huggingface_hub", "datasets"]
-PKGS = Path("/content/pkgs")                                        # 依赖装在这里，可整体打包
-CACHE_TAR = Path("/content/drive/MyDrive/webdev_cache/pkgs.tar.zst")  # Drive 里的缓存
+PKGS = Path("/content/pkgs")  # 依赖装在这里，不动 Colab 自带的环境
 
 
 def use_pkgs():
@@ -54,15 +53,14 @@ def use_pkgs():
 
 if ON_VM and not DRY_RUN_HTML_DIR:
     t0 = time.time()
-    if not PKGS.exists() and CACHE_TAR.exists():
-        sh("which zstd >/dev/null || apt-get install -y -q zstd >/dev/null")
-        sh(f"tar -I 'zstd -T0' -xf '{CACHE_TAR}' -C /content")
-        print(f"从 Drive 缓存解压依赖，用时 {time.time() - t0:.0f}s")
-    if not PKGS.exists():
-        print("没有找到 Drive 缓存，现场安装（约 6 分钟）")
-        sh(f"{sys.executable} -m pip install -q --target {PKGS} " + " ".join(f"'{p}'" for p in PINS))
+    if not (PKGS / ".ok").exists():
+        print("安装依赖（uv，约 2–3 分钟）")
+        sh(f"{sys.executable} -m pip install -q uv")
+        sh(f"{sys.executable} -m uv pip install -q --python {sys.executable} --target {PKGS} "
+           + " ".join(f"'{p}'" for p in PINS))
         use_pkgs()
         sh(f"{sys.executable} -m playwright install chromium")
+        (PKGS / ".ok").touch()
     use_pkgs()
     if not Path("/content/.pw_deps_ok").exists():
         sh(f"{sys.executable} -m playwright install-deps chromium >/dev/null 2>&1")
