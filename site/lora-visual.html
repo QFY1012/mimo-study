@@ -207,12 +207,19 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
   <p class="prose">先看最小的情况 r = 1：B 只有一列 <span class="train-t">u</span>（d_out 个数），A 只有一行 <span class="train-t">v</span>（d_in 个数）。两者相乘 u·vᵀ 叫<b>外积</b>，结果是一个完整的矩阵，第 i 行第 j 列就是 u<sub>i</sub> × v<sub>j</sub>。所以 m + n 个数就能"铺开"成 m × n 个数。点一下矩阵里的格子看看它是怎么来的。</p>
   <div class="panel">
     <div class="controls">
-      <button id="opNew" type="button">换一对向量</button>
-      <span class="small muted">u 有 8 个数，v 有 10 个数，铺开成 8 × 10 = 80 个数</span>
+      <div class="ctrl">
+        <label for="opR">r</label>
+        <select id="opR">
+          <option value="1">1：一对向量</option>
+          <option value="2">2：两对向量</option>
+        </select>
+      </div>
+      <button id="opNew" type="button">换一组向量</button>
+      <span class="small muted" id="opInfo">–</span>
     </div>
     <div class="fig"><svg id="opSvg" role="img" aria-label="外积示意：u 乘 v 的转置"></svg></div>
     <p class="mono" id="opRead">–</p>
-    <p class="small muted">代价是它很"死板"：每一行都是 v 乘一个系数，每一列都是 u 乘一个系数。这样的矩阵秩为 1，只能表达一个方向上的变化。</p>
+    <p class="small muted" id="opNote">–</p>
   </div>
 
   <p class="prose">r 对向量各自做外积再相加，就是 B·A：B 的第 k 列和 A 的第 k 行配成一对。反过来，<b>任何矩阵都能拆成若干层外积之和</b>，这就是奇异值分解（SVD）：M = σ₁u₁v₁ᵀ + σ₂u₂v₂ᵀ + …，每层的分量 σ 从大到小排列。只保留前 r 层，就是所有秩为 r 的矩阵里离 M 最近的那个（Eckart–Young 定理），误差正好等于被丢掉的那些 σ² 之和。</p>
@@ -733,39 +740,53 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
 
   /* ---------- 2a. outer product ---------- */
   const OP_M = 8, OP_N = 10;
-  const op = { seed: 3, sel: [2, 6] };
+  const op = { seed: 3, sel: [2, 6], r: 1 };
   function opInit() {
     const r = rng(op.seed * 31);
-    op.u = Array.from({ length: OP_M }, () => +(r() * 2 - 1).toFixed(2));
-    op.v = Array.from({ length: OP_N }, () => +(r() * 2 - 1).toFixed(2));
+    op.U = [0, 1].map(() => Array.from({ length: OP_M }, () => +(r() * 2 - 1).toFixed(2)));
+    op.V = [0, 1].map(() => Array.from({ length: OP_N }, () => +(r() * 2 - 1).toFixed(2)));
   }
+  const SUB = ["₁", "₂"];
   function divColor(v, maxAbs) {
     const surf = hexToRgb(css("--surface")), pos = hexToRgb(css("--pos")), neg = hexToRgb(css("--neg"));
     const c = mix(surf, v >= 0 ? pos : neg, Math.pow(Math.min(1, Math.abs(v) / (maxAbs || 1)), 0.7));
     return `rgb(${c[0]},${c[1]},${c[2]})`;
   }
   function drawOuter() {
-    const cs = 28, gap = 10, x0 = 30 + cs + gap, y0 = 22 + cs + gap;
+    const rr = op.r, cs = 28, gap = 10;
+    const x0 = 30 + rr * cs + gap, y0 = 22 + rr * cs + gap;
     const W = x0 + OP_N * cs + 20, H = y0 + OP_M * cs + 10;
     const svg = $("opSvg");
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("width", "100%"); svg.style.maxWidth = W * 1.25 + "px";
     const [si, sj] = op.sel, line = css("--ink");
-    let h = `<text x="${x0}" y="14" class="svg-muted" font-size="12">vᵀ（A 的一行）</text>
-             <text x="2" y="${y0 - 6}" class="svg-muted" font-size="12">u</text>`;
-    op.v.forEach((v, j) => {
-      h += `<rect x="${x0 + j * cs}" y="22" width="${cs - 2}" height="${cs - 2}" fill="${divColor(v, 1)}" stroke="${j === sj ? line : "none"}" stroke-width="2"/>`;
-    });
-    op.u.forEach((u, i) => {
-      h += `<rect x="30" y="${y0 + i * cs}" width="${cs - 2}" height="${cs - 2}" fill="${divColor(u, 1)}" stroke="${i === si ? line : "none"}" stroke-width="2"/>`;
-      op.v.forEach((v, j) => {
-        const on = i === si && j === sj;
-        h += `<rect data-i="${i}" data-j="${j}" tabindex="0" role="button" aria-label="第 ${i + 1} 行第 ${j + 1} 列" x="${x0 + j * cs}" y="${y0 + i * cs}" width="${cs - 2}" height="${cs - 2}" fill="${divColor(u * v, 1)}" stroke="${on ? line : "none"}" stroke-width="2" style="cursor:pointer"/>`;
+    const val = (i, j) => { let s = 0; for (let k = 0; k < rr; k++) s += op.U[k][i] * op.V[k][j]; return s; };
+    let h = `<text x="${x0}" y="14" class="svg-muted" font-size="12">${rr === 1 ? "vᵀ（A 的一行）" : "v₁ᵀ、v₂ᵀ（A 的两行）"}</text>
+             <text x="2" y="${y0 - 6}" class="svg-muted" font-size="12">${rr === 1 ? "u" : "u₁ u₂"}</text>`;
+    for (let k = 0; k < rr; k++) {
+      op.V[k].forEach((v, j) => {
+        h += `<rect x="${x0 + j * cs}" y="${22 + k * cs}" width="${cs - 2}" height="${cs - 2}" fill="${divColor(v, 1)}" stroke="${j === sj ? line : "none"}" stroke-width="2"/>`;
       });
-    });
+      op.U[k].forEach((u, i) => {
+        h += `<rect x="${30 + k * cs}" y="${y0 + i * cs}" width="${cs - 2}" height="${cs - 2}" fill="${divColor(u, 1)}" stroke="${i === si ? line : "none"}" stroke-width="2"/>`;
+      });
+    }
+    for (let i = 0; i < OP_M; i++) for (let j = 0; j < OP_N; j++) {
+      const on = i === si && j === sj;
+      h += `<rect data-i="${i}" data-j="${j}" tabindex="0" role="button" aria-label="第 ${i + 1} 行第 ${j + 1} 列" x="${x0 + j * cs}" y="${y0 + i * cs}" width="${cs - 2}" height="${cs - 2}" fill="${divColor(val(i, j), rr)}" stroke="${on ? line : "none"}" stroke-width="2" style="cursor:pointer"/>`;
+    }
     svg.innerHTML = h;
-    const u = op.u[si], v = op.v[sj];
-    $("opRead").textContent = `M[${si + 1}][${sj + 1}] = u${si + 1} × v${sj + 1} = ${u.toFixed(2)} × ${v.toFixed(2)} = ${(u * v).toFixed(3)}`;
+    const terms = Array.from({ length: rr }, (_, k) => [op.U[k][si], op.V[k][sj]]);
+    const sym = terms.map((_, k) => `u${rr > 1 ? SUB[k] : ""}[${si + 1}]×v${rr > 1 ? SUB[k] : ""}[${sj + 1}]`).join(" + ");
+    const num = terms.map(([a, b]) => `${a.toFixed(2)}×${b.toFixed(2)}`).join(" + ");
+    $("opRead").textContent = `M[${si + 1}][${sj + 1}] = ${sym} = ${num} = ${val(si, sj).toFixed(3)}`;
+    $("opInfo").textContent = rr === 1
+      ? "存 8 + 10 = 18 个数，铺开成 8 × 10 = 80 个数"
+      : "存 2 × (8 + 10) = 36 个数，铺开成 8 × 10 = 80 个数";
+    $("opNote").textContent = rr === 1
+      ? "代价是它很\"死板\"：每一行都是 v 乘一个系数，每一列都是 u 乘一个系数。这样的矩阵秩为 1，只能表达一个方向上的变化。"
+      : "两层外积相加：每个格子是两项乘积之和，每一行都是 v₁ 和 v₂ 按不同比例的组合。秩最多为 2，能表达两个独立方向的变化，比 r = 1 灵活，但参数也翻倍了。注意看，各行不再只是同一个图案的明暗缩放。";
   }
+  $("opR").addEventListener("change", () => { op.r = +$("opR").value; drawOuter(); });
   function opPick(e) {
     const t = e.target.closest("rect[data-i]"); if (!t) return;
     op.sel = [+t.dataset.i, +t.dataset.j]; drawOuter();
