@@ -7,7 +7,7 @@
 | `webdev_stage0_eval.ipynb` | 基线评测；填了 `ADAPTER_DIR` 就是训练前后对比 | 16 题约 30–40 分钟 |
 | `webdev_stage1_train.ipynb` | LoRA GRPO 训练，可断点续训 | 每步约 12–18 分钟 |
 
-`dist/*.py` 是同样内容的纯脚本，用于 `colab exec` 或 `python` 直接运行。改代码请改 `src/`，然后运行 `python colab/build.py` 重新生成。
+`dist/*.py` 是同样内容的纯脚本。命令行运行时用 `python -c "p='/content/x.py'; exec(compile(open(p).read(), p, 'exec'))"` 启动，不要用 `python x.py`：vLLM 用 spawn 启动子进程，`python x.py` 会让子进程把整个脚本再执行一遍。改代码请改 `src/`，然后运行 `python colab/build.py` 重新生成。
 
 ## 运行顺序
 

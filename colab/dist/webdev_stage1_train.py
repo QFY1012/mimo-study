@@ -33,11 +33,12 @@ def sh(cmd):
 
 
 if not SELFTEST_ONLY:
-    import torch
-    assert torch.cuda.is_available(), "没有 GPU：运行时请选 A100"
-    mem = torch.cuda.get_device_properties(0).total_memory / 2**30
-    print(torch.cuda.get_device_name(0), f"{mem:.0f} GiB")
-    assert mem > 70, "需要 80GB 显存：选 A100 并打开「高 RAM」"
+    # 用 nvidia-smi 查，不在 vLLM 启动前初始化 CUDA
+    _gpu = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                          capture_output=True, text=True).stdout.strip()
+    assert _gpu, "没有 GPU：运行时请选 A100"
+    print(_gpu)
+    assert int(_gpu.split(",")[-1]) > 70000, "需要 80GB 显存：选 A100 并打开「高 RAM」"
 
 # %% [markdown]
 # ## 安装依赖（和评测 notebook 同一套版本）
