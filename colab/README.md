@@ -33,8 +33,9 @@
 
 默认判官：`deepseek-v4.1-flash`（最快；实测 8 张图一次挑选约 5 秒）。换模型设环境变量 `JUDGE_MODEL` 或改配置格。
 
+**已在 A100 80GB 上确认**（2026-10-21）：依赖按上面的版本装好约 6 分钟；vLLM 0.30.0 能加载这个模型，权重 16.8 GiB，KV cache 45.4 GiB（约 121 万 token，16K 长度下最多 74 条并发）。
+
 **需要在 GPU 上第一次运行时确认**：
-- vLLM 0.30.0 能否加载这个模型。
 - flash-linear-attention 能否装上。
 - TRL colocate 模式下的显存（vLLM 占 55%）。
 - 修补后的权重名能否被 vLLM 的 `load_weights` 接受。
