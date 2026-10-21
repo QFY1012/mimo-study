@@ -233,20 +233,26 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
           <option value="noise">纯随机噪声</option>
         </select>
       </div>
-      <div class="ctrl"><label for="svdR">保留前 r 层</label><input type="range" id="svdR" min="1" max="48" value="4"><output id="svdROut" for="svdR">4</output></div>
+      <div class="ctrl"><label for="svdR">用几对向量 r</label><input type="range" id="svdR" min="1" max="48" value="4"><output id="svdROut" for="svdR">4</output></div>
+      <button id="svdPlay" type="button">从 1 对开始逐对叠加</button>
     </div>
+    <p class="small">怎么看：左图是原矩阵，4608 个格子每个都要存。<b>右图不是存下来的</b>，而是现场用 r 对向量拼出来的：每对向量（一列 48 个数，一行 96 个数）做一次外积，得到一张"图层"，r 张图层叠在一起就是右图。点上面的按钮，看它从 1 对开始一对一对加上去，怎么从模糊变清楚。</p>
     <div class="lab-grid">
-      <div class="cell wide"><canvas id="cvOrig" width="96" height="48"></canvas><div class="cap">原矩阵 M（48 × 96 = 4608 个数）</div></div>
-      <div class="cell wide"><canvas id="cvRec" width="96" height="48"></canvas><div class="cap" id="recCap">前 r 层之和</div></div>
+      <div class="cell wide"><canvas id="cvOrig" width="96" height="48"></canvas><div class="cap">原矩阵：48 × 96 = 4,608 个数，全部要存</div></div>
+      <div class="cell wide"><canvas id="cvRec" width="96" height="48"></canvas><div class="cap" id="recCap">–</div></div>
+    </div>
+    <div class="stack" style="gap:6px">
+      <div class="mem-row"><div class="name small">原矩阵</div><div class="mem-track" style="height:16px"><div class="seg seg-w" style="width:100%"></div></div><div class="tot">4,608</div></div>
+      <div class="mem-row"><div class="name small" id="svBarName">4 对向量</div><div class="mem-track" style="height:16px"><div class="seg seg-l" id="svBar"></div></div><div class="tot" id="svBarN">–</div></div>
     </div>
     <div class="readout">
-      <div>保留的能量 Σσ²<b id="svEnergy">–</b></div>
-      <div>相对误差<b id="svErr">–</b></div>
-      <div>需要存的数<b id="svParams">–</b></div>
+      <div>和原图的差距（相对误差）<b id="svErr">–</b></div>
+      <div>还原了多少"信息量"（能量 Σσ²）<b id="svEnergy">–</b></div>
+      <div>需要存的数 / 原矩阵<b id="svParams">–</b></div>
     </div>
     <div class="cell wide"><canvas id="cvSpec" width="480" height="180"></canvas><div class="cap">奇异值 σ（前 48 个）。橙色是保留的层；掉得越快，前几层越能代表整个矩阵</div></div>
     <div class="stack">
-      <div class="cap small muted">前 4 层各自长什么样（每一层都是一个外积 σ·u·vᵀ）</div>
+      <div class="cap small muted">前 4 张图层分别长什么样。每张图左边那一竖条是 u（48 个数），上面那一横条是 v（96 个数），中间就是它们的外积：第 i 行第 j 列 = u 的第 i 个数 × v 的第 j 个数。</div>
       <div class="lab-grid" id="layerGrid"></div>
     </div>
   </div>
@@ -880,7 +886,10 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
     $("svErr").textContent = (Math.sqrt(Math.max(0, svd.total - kept) / svd.total) * 100).toFixed(1) + "%";
     const p = r * (SM + SN);
     $("svParams").textContent = `${fmtInt(p)} / ${fmtInt(SM * SN)}`;
-    $("recCap").textContent = `前 ${r} 层之和：存 ${r} × (48 + 96) = ${fmtInt(p)} 个数`;
+    $("recCap").textContent = `用 ${r} 对向量拼出来：${r} × (48 + 96) = ${fmtInt(p)} 个数${p >= SM * SN ? "（已经比原矩阵还多，不划算了）" : ""}`;
+    $("svBarName").textContent = `${r} 对向量`;
+    $("svBar").style.width = Math.min(100, p / (SM * SN) * 100) + "%";
+    $("svBarN").textContent = fmtInt(p);
     // spectrum
     const { ctx, w, h } = setupCanvas($("cvSpec"));
     ctx.clearRect(0, 0, w, h);
@@ -897,14 +906,42 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
     const grid = $("layerGrid");
     if (!grid.children.length) grid.innerHTML = [0, 1, 2, 3].map((k) => `<div class="cell wide"><canvas id="cvLayer${k}"></canvas><div class="cap" id="capLayer${k}"></div></div>`).join("");
     for (let k = 0; k < 4; k++) {
-      const u = svd.U[k], wv = svd.Wt[k];
-      const Lk = zeros(SM, SN).map((row, i) => row.map((_, j) => u[i] * wv[j]));
-      paintMatrix($("cvLayer" + k), Lk, 0, 1, true);
-      $("capLayer" + k).textContent = `第 ${k + 1} 层：σ = ${Math.sqrt(svd.lam[k]).toFixed(2)}，占能量 ${(svd.lam[k] / svd.total * 100).toFixed(1)}%`;
+      paintLayer($("cvLayer" + k), svd.U[k], svd.Wt[k]);
+      const used = k < r ? "已叠进右图" : "还没用上";
+      $("capLayer" + k).textContent = `第 ${k + 1} 对：占信息量 ${(svd.lam[k] / svd.total * 100).toFixed(1)}%（${used}）`;
+      $("cvLayer" + k).style.opacity = k < r ? "1" : "0.45";
     }
   }
-  $("svdKind").addEventListener("change", svdInit);
-  $("svdR").addEventListener("input", drawSvd);
+  function paintLayer(canvas, u, w) {
+    const pad = 4, g = 2, W = pad + g + SN, H = pad + g + SM;
+    canvas.width = W; canvas.height = H; canvas.style.aspectRatio = `${W} / ${H}`; canvas.style.maxWidth = "100%"; canvas.style.imageRendering = "pixelated";
+    const ctx = canvas.getContext("2d"), img = ctx.createImageData(W, H);
+    const surf = hexToRgb(css("--surface")), pos = hexToRgb(css("--pos")), neg = hexToRgb(css("--neg"));
+    const mu = Math.max(...u.map(Math.abs)) || 1, mw = Math.max(...Array.from(w, Math.abs)) || 1;
+    const put = (x, y, v, m) => {
+      const c = mix(surf, v >= 0 ? pos : neg, Math.pow(Math.min(1, Math.abs(v) / m), 0.7));
+      const o = (y * W + x) * 4; img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+    };
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) put(x, y, 0, 1);
+    for (let i = 0; i < SM; i++) for (let x = 0; x < pad; x++) put(x, pad + g + i, u[i], mu);
+    for (let j = 0; j < SN; j++) for (let y = 0; y < pad; y++) put(pad + g + j, y, w[j], mw);
+    for (let i = 0; i < SM; i++) for (let j = 0; j < SN; j++) put(pad + g + j, pad + g + i, u[i] * w[j], mu * mw);
+    ctx.putImageData(img, 0, 0);
+  }
+  let svdTimer = null;
+  function stopPlay() { if (svdTimer) { clearInterval(svdTimer); svdTimer = null; } $("svdPlay").textContent = "从 1 对开始逐对叠加"; }
+  $("svdPlay").addEventListener("click", () => {
+    if (svdTimer) { stopPlay(); return; }
+    let r = 1; $("svdR").value = r; drawSvd();
+    $("svdPlay").textContent = "停止";
+    svdTimer = setInterval(() => {
+      r += 1;
+      if (r > 24) { stopPlay(); return; }
+      $("svdR").value = r; drawSvd();
+    }, 450);
+  });
+  $("svdKind").addEventListener("change", () => { stopPlay(); svdInit(); });
+  $("svdR").addEventListener("input", () => { stopPlay(); drawSvd(); });
 
   /* ---------- boot & theme ---------- */
   function renderAll() { drawShape(); drawOuter(); drawSvd(); renderLab(); drawAlpha(); drawMem(); drawBf16(); }
