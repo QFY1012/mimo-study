@@ -42,19 +42,44 @@ if not SELFTEST_ONLY:
 
 # %% [markdown]
 # ## 安装依赖（和评测 notebook 同一套版本）
+# 如果 Drive 里有 `webdev_cache/pkgs.tar.zst`，直接解压，不用现场安装。
 
 # %%
 PINS = ["vllm==0.30.0", "transformers==5.18.0", "peft==0.21.2", "trl==1.14.2", "accelerate==1.15.0",
         "flash-linear-attention", "openai", "pandas", "pyarrow", "pillow", "playwright", "huggingface_hub", "datasets"]
-if ON_VM and not SELFTEST_ONLY:
+PKGS = Path("/content/pkgs")                                        # 依赖装在这里，可整体打包
+CACHE_TAR = Path("/content/drive/MyDrive/webdev_cache/pkgs.tar.zst")  # Drive 里的缓存
+
+
+def use_pkgs():
+    """把 /content/pkgs 放到最前面；写进环境变量，vLLM 的子进程也能找到。"""
+    if str(PKGS) not in sys.path:
+        sys.path.insert(0, str(PKGS))
+    if str(PKGS) not in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+        os.environ["PYTHONPATH"] = str(PKGS) + os.pathsep + os.environ.get("PYTHONPATH", "")
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(PKGS / "ms-playwright")
+
+
+if ON_VM:
+    t0 = time.time()
+    if not PKGS.exists() and CACHE_TAR.exists():
+        sh("which zstd >/dev/null || apt-get install -y -q zstd >/dev/null")
+        sh(f"tar -I 'zstd -T0' -xf '{CACHE_TAR}' -C /content")
+        print(f"从 Drive 缓存解压依赖，用时 {time.time() - t0:.0f}s")
+    if not PKGS.exists():
+        print("没有找到 Drive 缓存，现场安装（约 6 分钟）")
+        sh(f"{sys.executable} -m pip install -q --target {PKGS} " + " ".join(f"'{p}'" for p in PINS))
+        use_pkgs()
+        sh(f"{sys.executable} -m playwright install chromium")
+    use_pkgs()
+    if not Path("/content/.pw_deps_ok").exists():
+        sh(f"{sys.executable} -m playwright install-deps chromium >/dev/null 2>&1")
+        Path("/content/.pw_deps_ok").touch()
     try:
-        import trl, vllm
-        assert trl.__version__ == "1.14.2" and vllm.__version__ == "0.30.0"
-        print("依赖已安装")
-    except Exception:
-        sh(f"{sys.executable} -m pip install -q " + " ".join(f"'{p}'" for p in PINS))
-        sh("playwright install --with-deps chromium")
-        print("安装完成。如果后面 import 报错，重启会话后从下一格继续。")
+        import vllm
+        print(f"依赖就绪：vllm {vllm.__version__}，用时 {time.time() - t0:.0f}s")
+    except Exception as e:  # CPU 机器上 vLLM 可能导入失败，不影响自检
+        print("依赖就绪（vllm 未导入：", type(e).__name__, "）")
 
 # %% [markdown]
 # ## 配置
