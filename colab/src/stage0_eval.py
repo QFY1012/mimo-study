@@ -61,7 +61,7 @@ MAX_NEW_TOKENS = 12288
 SAMPLING = dict(temperature=0.6, top_p=0.95, top_k=20)  # 官方 webdev 配置
 
 JUDGE = dict(judge_base_url=os.environ.get("JUDGE_BASE_URL", "https://openoneapi.com/v1"),
-             judge_model=os.environ.get("JUDGE_MODEL", "kimi-k3"), judge_concurrency=8)
+             judge_model=os.environ.get("JUDGE_MODEL", "deepseek-v4.1-flash"), judge_concurrency=8)
 
 WORKDIR = Path(os.environ.get("WORKDIR") or ("/content/webdev_eval" if ON_VM else "webdev_eval_out"))
 WORKDIR.mkdir(parents=True, exist_ok=True)

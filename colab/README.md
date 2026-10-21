@@ -31,6 +31,8 @@
 - TRL 1.14.2 的完整接线：CPU 上用小模型跑通 2 步训练、记录指标、保存 checkpoint。
 - 判官 endpoint：kimi-k3、glm-5.3-flash、qwen3.8-max、deepseek-v4.1-flash 都能看图，并输出合法 JSON。
 
+默认判官：`deepseek-v4.1-flash`（最快；实测 8 张图一次挑选约 5 秒）。换模型设环境变量 `JUDGE_MODEL` 或改配置格。
+
 **需要在 GPU 上第一次运行时确认**：
 - vLLM 0.30.0 能否加载这个模型。
 - flash-linear-attention 能否装上。

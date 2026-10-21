@@ -76,7 +76,7 @@ SAVE_EVERY = 5
 KEEP_SHOTS_EVERY = 10         # 每 10 步保留一次截图，其余删掉省磁盘
 
 JUDGE = dict(judge_base_url=os.environ.get("JUDGE_BASE_URL", "https://openoneapi.com/v1"),
-             judge_model=os.environ.get("JUDGE_MODEL", "kimi-k3"), judge_concurrency=8)
+             judge_model=os.environ.get("JUDGE_MODEL", "deepseek-v4.1-flash"), judge_concurrency=8)
 
 WORKDIR = Path(os.environ.get("WORKDIR") or ("/content/webdev_train" if ON_VM else "webdev_train_out"))
 OUTPUT_DIR = WORKDIR / "checkpoints"

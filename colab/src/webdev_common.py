@@ -30,7 +30,7 @@ Image.MAX_IMAGE_PIXELS = None
 # ---------------------------------------------------------------- settings
 CFG = dict(
     judge_base_url="https://openoneapi.com/v1",
-    judge_model="kimi-k3",
+    judge_model="deepseek-v4.1-flash",
     judge_temperature=1.0,      # both official judges use 1.0
     judge_concurrency=8,
     pick_rounds=8,              # official: 8 rounds, Williams order
