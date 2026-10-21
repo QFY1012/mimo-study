@@ -300,6 +300,12 @@ footer { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line)
     </div>
     <p class="mono" style="text-align:center">y = W·x + (α / r) · B·(A·x)</p>
   </div>
+  <div class="stack prose">
+    <h3>为什么是相加，而不是用 B·A 替换 W？</h3>
+    <p>因为我们要学的是<b>改动量</b>，不是整个新矩阵。微调本来就是 W 变成 W + ΔW，而 W·x + B·A·x = (W + B·A)·x，两条路相加在数学上就等于把 W 改成了 W + B·A。</p>
+    <p>如果拿 B·A 直接替换 W，就要用秩只有 r 的矩阵去表示整个 W。但预训练好的 W 本身不是低秩的，它的奇异值不会很快变小（性质更接近第 2 节里的"纯随机噪声"），64 对向量远远装不下，模型学到的知识会大量丢失。低秩假设针对的是<b>改动量 ΔW</b>，不是 W 本身。</p>
+    <p>相加还带来两个好处：B 初始化为 0，训练刚开始时模型和原来完全一样，可以从一个已经很强的起点慢慢调整；关掉旁路就能还原原模型，RL 里的参考模型因此不用另外加载。</p>
+  </div>
 </section>
 
 <!-- 4. lab -->
